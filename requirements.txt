@@ -1,0 +1,5 @@
+google-genai
+pydantic
+pdfplumber
+pypdf
+python-dotenv
