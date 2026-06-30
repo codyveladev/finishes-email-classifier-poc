@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Finishes Solutions Email Classifier POC</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h2 { margin-bottom: 0.25rem; }
+    .sub { color: #666; margin-top: 0; }
+    fieldset { border: 1px solid #ddd; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+    legend { padding: 0 0.4rem; font-weight: 600; color: #444; }
+    label { display: block; font-size: 0.9rem; color: #555; margin-bottom: 0.2rem; }
+    input[type=text], textarea, select, input[type=file] { width: 100%; padding: 0.45rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; box-sizing: border-box; }
+    textarea { resize: vertical; }
+    .row { margin-bottom: 0.85rem; }
+    button { background: #2563eb; color: white; border: 0; padding: 0.6rem 1.2rem; border-radius: 4px; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .result { border-left: 4px solid #2563eb; background: #f8fafc; padding: 1rem 1.25rem; border-radius: 4px; }
+    .result.review { border-color: #d97706; background: #fffbeb; }
+    .result.error { border-color: #dc2626; background: #fef2f2; }
+    .label { font-size: 1.25rem; font-weight: 700; }
+    .conf { color: #555; font-weight: 500; }
+    .review-flag { color: #d97706; font-weight: 600; margin-left: 0.5rem; }
+    .rationale { margin: 0.5rem 0; }
+    .hits { color: #666; font-size: 0.85rem; }
+    .note { font-size: 0.8rem; color: #777; margin-top: 0.3rem; }
+    .model-badge { display: inline-block; background: #eef2ff; color: #3730a3; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; vertical-align: middle; margin-left: 0.5rem; }
+    input[readonly], textarea[readonly], select:disabled, input:disabled { background: #f1f5f9; color: #475569; cursor: not-allowed; }
+    .preset-banner { background: #ecfeff; border: 1px solid #a5f3fc; color: #155e75; padding: 0.5rem 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem; }
+    .clear-link { display: inline-block; margin-left: 0.75rem; color: #2563eb; text-decoration: none; font-size: 0.9rem; }
+    .clear-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h2>Finishes Solutions Email Classifier POC<span class="model-badge">model: {{ model }}</span></h2>
+  <p class="sub">Simulate an incoming email. Pick a sample attachment or upload your own (PDF).</p>
+
+  <form method="post" action="/classify" enctype="multipart/form-data">
+    <fieldset>
+      <legend>Preset test case</legend>
+      <div class="row">
+        <label for="preset">Load a known-good case (locks the form)</label>
+        <select id="preset">
+          <option value="">— custom (fill in below) —</option>
+          {% for name in presets.keys() %}
+          <option value="{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="preset-banner" class="preset-banner" style="display:none;">
+        Preset loaded — fields are locked. Hit <b>Classify</b> to run, or pick "custom" to edit.
+      </div>
+      <div id="preset-hidden"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Email</legend>
+      <div class="row">
+        <label for="sender_domain">Sender domain</label>
+        <input type="text" id="sender_domain" name="sender_domain" required
+               value="{{ sender_domain or '' }}" placeholder="brightleafretail.com">
+      </div>
+      <div class="row">
+        <label for="subject">Subject</label>
+        <input type="text" id="subject" name="subject" required
+               value="{{ subject or '' }}" placeholder="Executed lease — Maple Crossing">
+      </div>
+      <div class="row">
+        <label for="body">Body (optional)</label>
+        <textarea id="body" name="body" rows="4">{{ body or '' }}</textarea>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Attachment (one document)</legend>
+      <div class="row">
+        <label for="sample">Use a sample</label>
+        <select id="sample" name="sample">
+          {% for label, path in samples.items() %}
+          <option value="{{ path }}" {% if selected_sample == path %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="row">
+        <label for="upload">…or upload your own (PDF)</label>
+        <input type="file" id="upload" name="upload" accept=".pdf,application/pdf">
+        <p class="note">If you upload a file, it takes priority over the sample dropdown.</p>
+      </div>
+    </fieldset>
+
+    <button type="submit">Classify</button>
+    <a href="/" class="clear-link">Clear</a>
+  </form>
+
+  <script>
+    const PRESETS = {{ presets|tojson }};
+    const presetSelect = document.getElementById('preset');
+    const banner = document.getElementById('preset-banner');
+    const hiddenContainer = document.getElementById('preset-hidden');
+    const f = {
+      sender_domain: document.getElementById('sender_domain'),
+      subject: document.getElementById('subject'),
+      body: document.getElementById('body'),
+      sample: document.getElementById('sample'),
+      upload: document.getElementById('upload'),
+    };
+
+    function unlock() {
+      hiddenContainer.innerHTML = '';
+      banner.style.display = 'none';
+      f.sender_domain.readOnly = false;
+      f.subject.readOnly = false;
+      f.body.readOnly = false;
+      f.sample.disabled = false;
+      f.upload.disabled = false;
+    }
+
+    function applyPreset(name) {
+      if (!name) { unlock(); return; }
+      const p = PRESETS[name];
+      f.sender_domain.value = p.sender_domain;
+      f.subject.value = p.subject;
+      f.body.value = p.body;
+      f.sample.value = p.sample;
+      // readonly inputs still submit; disabled don't — so add hidden for the disabled select.
+      f.sender_domain.readOnly = true;
+      f.subject.readOnly = true;
+      f.body.readOnly = true;
+      f.sample.disabled = true;
+      f.upload.disabled = true;
+      f.upload.value = '';
+      hiddenContainer.innerHTML = '';
+      const hid = document.createElement('input');
+      hid.type = 'hidden';
+      hid.name = 'sample';
+      hid.value = p.sample;
+      hiddenContainer.appendChild(hid);
+      banner.style.display = 'block';
+    }
+
+    presetSelect.addEventListener('change', e => applyPreset(e.target.value));
+  </script>
+
+  {% if error %}
+  <h3>Result</h3>
+  <div class="result error">
+    <div><span class="label">Classification failed</span></div>
+    <p class="rationale">{{ error }}</p>
+  </div>
+  {% endif %}
+
+  {% if result %}
+  <h3>Result</h3>
+  <div class="result {% if result.needs_review %}review{% endif %}">
+    <div>
+      <span class="label">{{ result.label }}</span>
+      <span class="conf">— {{ '%.0f'|format(result.confidence*100) }}%</span>
+      {% if result.needs_review %}<span class="review-flag">[needs review]</span>{% endif %}
+    </div>
+    <p class="rationale">{{ result.rationale }}</p>
+    <p>
+      <b>Identifier:</b>
+      {% if result.identifier %}
+        <code>{{ result.identifier }}</code>
+        ({% if result.identifier.startswith('OP-') %}Deal{% elif result.identifier.startswith('AS-') %}Asset{% else %}Unknown type{% endif %})
+      {% else %}
+        <i>none</i>
+      {% endif %}
+      <br>
+      <small>{{ result.identifier_rationale }}</small>
+      {% if result.identifier_candidates %}
+        <br><small class="hits">candidates seen: {{ result.identifier_candidates|join(', ') }}</small>
+      {% endif %}
+    </p>
+    <p class="hits"><b>keyword hits:</b> {{ result.keyword_hits|join(', ') or '(none)' }}</p>
+    {% if upload_name %}<p class="note">Classified from upload: {{ upload_name }}</p>{% endif %}
+  </div>
+  {% endif %}
+</body>
+</html>

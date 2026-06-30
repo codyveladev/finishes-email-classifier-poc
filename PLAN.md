@@ -384,7 +384,157 @@ uvicorn app:app --reload      # open http://127.0.0.1:8000
 - [ ] Low-confidence results are flagged `needs_review` rather than mislabeled.
 - [ ] The web form classifies a simulated email end to end.
 
-## 11. Out of scope (deliberately) / next steps
+## 11. Phase 4 — Word + Excel attachment support (planned)
+
+PDF only is fine for the POC, but real inboxes carry `.docx` and `.xlsx`
+attachments constantly (rent rolls, invoices, vendor agreements, budgets).
+This phase extends `extract.py` to handle them. The classifier itself does
+not change — `classify()` already calls `extract_text(path)` and treats the
+result as a blob of text.
+
+### Approach
+
+Dispatch on file extension inside `extract_text()`:
+
+| Extension | Library | Notes |
+|---|---|---|
+| `.pdf` | `pdfplumber` → `pypdf` fallback | already implemented |
+| `.docx` | `python-docx` | extract paragraphs **and** table cells (easy to miss tables) |
+| `.xlsx` | `openpyxl` | iterate sheets; flatten each row as tab-joined cells; prefix with sheet name |
+| `.csv` | stdlib `csv` | read rows as text |
+| `.doc` / `.xls` (legacy) | — | **out of scope.** Return `""` + log a warning. Needs LibreOffice headless or `pywin32`; real-estate folks still send these so revisit later. |
+| anything else | — | return `""` |
+
+### Design notes
+
+- **Excel "text" is awkward.** Spreadsheets aren't prose. For classification we
+  only need keywords to surface, so flattening `Sheet: Invoices\n4471\tNet 30\t$12,400`
+  is enough. Do **not** try to preserve layout.
+- **Token budget.** A 50-sheet financial model could blow past the 6000-char
+  signal truncation. Add a soft per-file cap (~50k chars) at extraction time
+  before the existing truncation in `build_signal()`.
+- **Word tables.** `python-docx` exposes `.paragraphs` and `.tables` separately;
+  iterate both or table content is silently dropped.
+- **Refactor.** Split `extract.py` into an `extract_text()` dispatcher plus
+  `_extract_pdf`, `_extract_docx`, `_extract_xlsx`, `_extract_csv` helpers.
+
+### Requirements additions
+
+```
+python-docx
+openpyxl
+```
+
+### Test additions
+
+Phase 2 currently covers PDF + no-attachment only. To prove the new paths,
+add at least:
+
+- one `.docx` case (e.g. a vendor agreement in Word) → Vendor Performance
+- one `.xlsx` case (e.g. a rent roll or invoice spreadsheet) → Payment / Billing or Lease / Occupancy
+
+Sample files can be generated programmatically or dropped in by hand.
+
+### Open decisions
+
+1. Generate sample `.docx` / `.xlsx` programmatically, or use real-world examples?
+2. Confirm legacy `.doc` / `.xls` stay out of scope for now.
+3. Confirm 50k-char per-file extraction cap (before the 6k signal truncation).
+
+---
+
+## 12. Phase 5 — Multiple attachments per email (planned)
+
+Real emails often carry several attachments (e.g. an invoice PDF + a backup
+spreadsheet). The POC currently accepts **one** attachment path; this phase
+extends the system to handle N.
+
+### Design questions to settle first
+
+1. **One label per email, or one per attachment?** Most likely "one label per
+   email" — an email is a single event in the property-manager's workflow. So
+   attachments get concatenated into the signal text, not classified
+   independently. Multi-label per email is a different product.
+2. **Concatenation strategy.** Each attachment's extracted text is prefixed
+   with `--- ATTACHMENT: {filename} ---` so the model can tell them apart and
+   reference them in the rationale.
+3. **Token budget.** The current 6000-char attachment truncation in
+   `build_signal()` has to become a *total* budget split across N attachments —
+   either even split (`6000 / N` each) or first-come-first-served. Probably
+   first-come, since the first attachment is usually the primary one.
+4. **Keyword hits aggregation.** `keyword_hits()` already operates on a single
+   text blob — feed it the concatenated text; no change needed.
+5. **UI.** The form's file input becomes `<input type="file" multiple>` and
+   the sample dropdown becomes a multi-select (or a checkbox list of samples).
+   The result UI lists which files contributed.
+
+### Implementation sketch
+
+- `classifier.classify()` signature changes from
+  `attachment_path: Optional[str]` to `attachment_paths: list[str] | None`.
+  Keep a single-path shim for backwards compatibility with `run_cli.py` and
+  `test_cases.py`.
+- `build_signal()` loops over paths, calls `extract_text()` per file, and
+  emits a labeled block per attachment.
+- FastAPI route accepts `List[UploadFile]`; each file gets a temp path; all
+  paths cleaned up in `finally`.
+- Test cases gain a "multi-attachment" row (e.g. invoice PDF + payment
+  spreadsheet → Payment / Billing).
+
+### Open decisions
+
+1. Confirm "one label per email" (not per attachment).
+2. Confirm first-come truncation strategy for the 6000-char budget.
+3. Confirm UI pattern: multi-file upload + multi-select samples (vs. a
+   separate "attachments" repeating row).
+
+---
+
+## 13. Phase 6 — Project / Deal / Asset identifier extraction ✅
+
+Most emails reference a specific deal or asset by an internal code. We extract
+that code alongside the category so downstream automation can route the email
+to the right Monday.com / SharePoint record.
+
+### Identifier scheme
+
+- **`OP-####`** — a Deal (Opportunity / Project). 3+ digits.
+- **`AS-###`** — an Asset. 3+ digits.
+
+(Pattern is case-insensitive; we normalize to upper-case in output.)
+
+### How it works
+
+1. **Regex pre-pass** (`find_identifiers()` in [classifier.py](classifier.py))
+   scans the assembled signal text — subject + body + attachment text — for
+   all `OP-####` / `AS-###` matches. Returns deduped, order-preserved list of
+   candidates. Cheap and deterministic.
+2. **Candidates fed to the prompt** under an `IDENTIFIER CANDIDATES:` line so
+   Gemini can see exactly what the regex found.
+3. **Pydantic schema extended** with `identifier: Optional[str]` and
+   `identifier_rationale: str`. Gemini picks the best candidate (usually the
+   one mentioned in the subject, or the first one referenced in the
+   attachment), or returns `null` if nothing relevant was found.
+4. **Output** includes `identifier`, `identifier_rationale`, and the raw
+   `identifier_candidates` list (useful for debugging when the model picks
+   something unexpected).
+
+### Edge cases handled / to watch
+
+- **No identifier found:** `identifier` is `null`, `identifier_rationale`
+  explains "no identifier found".
+- **Multiple candidates:** model is told to pick the *best* one (subject
+  beats body beats attachment). When it's ambiguous, the rationale should
+  explain *why* that one was chosen.
+- **False positives** (e.g. "OP-100" appearing in boilerplate): the rationale
+  field is the user-facing audit trail — if the model picks something weird,
+  the rationale exposes that.
+- **New ID formats** (e.g. property codes, vendor IDs) can be added to the
+  regex without touching the schema.
+
+---
+
+## 14. Out of scope (deliberately) / next steps
 
 - Real email ingestion (Gmail/IMAP polling), file upload instead of a fixed path.
 - Project resolution (OP-### / AS-### + address matching).

@@ -12,4 +12,6 @@ if __name__ == "__main__":
     flag = "  [needs review]" if r["needs_review"] else ""
     print(f"{r['label']}  ({r['confidence']:.0%}){flag}")
     print(r["rationale"])
+    print(f"identifier: {r['identifier'] or '(none)'} — {r['identifier_rationale']}")
+    print("candidates:", r["identifier_candidates"])
     print("hits:", r["keyword_hits"])
