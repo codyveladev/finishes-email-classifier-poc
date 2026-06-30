@@ -64,6 +64,13 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 - [x] **Graceful API error handling** — `/classify` catches `google.genai.errors.ClientError` (429, 403, etc.), `ServerError`, generic `APIError`, `FileNotFoundError`, and bare `Exception`. Errors render in a red error block instead of crashing with a 500.
 - [x] Model switched to `gemini-2.5-flash-lite` (cheaper / higher free-tier quota for iteration)
 
+## Cleanup pass ✅
+
+- [x] Deleted `smoke_test.py` (one-off, served its purpose)
+- [x] Added [cases.py](cases.py) — single source of truth for the 7 test cases (frozen `Case` dataclass)
+- [x] [app.py](app.py) builds `PRESETS` from `cases.CASES`
+- [x] [test_cases.py](test_cases.py) imports `cases.CASES`; runs **one case by default** to conserve free-tier quota — set `RUN_ALL=1` to run all 7 with the 13s/req delay
+
 ## Future plans added to PLAN.md
 
 - **Phase 4** ([PLAN.md §11](PLAN.md)) — Word + Excel attachment support

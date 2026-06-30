@@ -1,38 +1,31 @@
+"""Phase 2 test runner. Runs ONE case by default to keep free-tier quota happy;
+set RUN_ALL=1 to run every case in cases.CASES with a 13s delay between calls."""
+
+import os
 import time
 from dotenv import load_dotenv; load_dotenv()
+
 from classifier import classify
+from cases import CASES
 
-REQUEST_INTERVAL_S = 13  # free tier: 5 req/min for gemini-2.5-flash
+REQUEST_INTERVAL_S = 13  # free tier: 5 req/min for the Flash models
 
-CASES = [
-    ("brightleafretail.com", "Executed lease — Maple Crossing", "",
-     "samples/Lease_Agreement_OP-142.pdf", "Lease / Occupancy"),
-    ("summitmechanical.com", "HVAC service agreement — Northgate", "",
-     "samples/Vendor_Agreement_AS-087.pdf",
-     ("Vendor Performance", "Compliance / Legal")),
-    ("apex-glass.com", "Invoice #4471 due Net 30", "", None, "Payment / Billing"),
-    ("city-permits.gov", "Permit approval — site grading", "", None,
-     "Compliance / Legal"),
-    ("capital-partners.com", "Q3 capital call notice", "", None,
-     "Capital / Finance"),
-    ("gc-buildwell.com", "Change order #12 — slab revision", "", None,
-     "Development / Construction"),
-    ("admin@ourfirm.com", "Board meeting minutes — March", "", None,
-     "General Governance"),
-]
+run_all = os.environ.get("RUN_ALL") == "1"
+cases_to_run = CASES if run_all else CASES[:1]
 
 passed = 0
-for i, (domain, subj, body, att, expected) in enumerate(CASES):
+for i, case in enumerate(cases_to_run):
     if i > 0:
         time.sleep(REQUEST_INTERVAL_S)
-    r = classify(domain, subj, body, att)
-    expected_set = expected if isinstance(expected, tuple) else (expected,)
-    ok = r["label"] in expected_set
+    r = classify(case.sender_domain, case.subject, case.body, case.attachment or None)
+    ok = r["label"] in case.expected
     passed += ok
     flag = " [review]" if r["needs_review"] else ""
-    exp_str = " or ".join(expected_set)
-    print(f"[{'PASS' if ok else 'FAIL'}] got={r['label']} "
-          f"({r['confidence']:.0%}){flag}  expected={exp_str}")
+    exp_str = " or ".join(case.expected)
+    print(f"[{'PASS' if ok else 'FAIL'}] {case.name}")
+    print(f"        got={r['label']} ({r['confidence']:.0%}){flag}  expected={exp_str}")
+    print(f"        identifier={r['identifier'] or '(none)'}")
     print(f"        rationale: {r['rationale']}")
 
-print(f"\n{passed}/{len(CASES)} correct")
+print(f"\n{passed}/{len(cases_to_run)} correct"
+      f"{'' if run_all else '  (set RUN_ALL=1 to run all 7)'}")

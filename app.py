@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import classifier
+from cases import CASES
 from google.genai import errors as genai_errors
 
 # One-shot result cache: POST writes, GET reads-and-pops. Prevents reload-resubmit
@@ -26,50 +27,15 @@ SAMPLES = {
     "Vendor Agreement (AS-087)": "samples/Vendor_Agreement_AS-087.pdf",
 }
 
-# Mirrors test_cases.py — selecting a preset locks the form to a known-good input.
+# Presets built from the shared CASES list — single source of truth shared with test_cases.py.
 PRESETS: dict[str, dict] = {
-    "Lease — Maple Crossing (OP-142)": {
-        "sender_domain": "brightleafretail.com",
-        "subject": "Executed lease — Maple Crossing",
-        "body": "",
-        "sample": "samples/Lease_Agreement_OP-142.pdf",
-    },
-    "Vendor — Northgate HVAC (AS-087)": {
-        "sender_domain": "summitmechanical.com",
-        "subject": "HVAC service agreement — Northgate",
-        "body": "",
-        "sample": "samples/Vendor_Agreement_AS-087.pdf",
-    },
-    "Invoice #4471 (no attachment)": {
-        "sender_domain": "apex-glass.com",
-        "subject": "Invoice #4471 due Net 30",
-        "body": "",
-        "sample": "",
-    },
-    "Permit approval (no attachment)": {
-        "sender_domain": "city-permits.gov",
-        "subject": "Permit approval — site grading",
-        "body": "",
-        "sample": "",
-    },
-    "Capital call (no attachment)": {
-        "sender_domain": "capital-partners.com",
-        "subject": "Q3 capital call notice",
-        "body": "",
-        "sample": "",
-    },
-    "Change order #12 (no attachment)": {
-        "sender_domain": "gc-buildwell.com",
-        "subject": "Change order #12 — slab revision",
-        "body": "",
-        "sample": "",
-    },
-    "Board minutes (no attachment)": {
-        "sender_domain": "admin@ourfirm.com",
-        "subject": "Board meeting minutes — March",
-        "body": "",
-        "sample": "",
-    },
+    c.name: {
+        "sender_domain": c.sender_domain,
+        "subject": c.subject,
+        "body": c.body,
+        "sample": c.attachment,
+    }
+    for c in CASES
 }
 
 
