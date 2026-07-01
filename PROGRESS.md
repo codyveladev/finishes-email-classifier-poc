@@ -4,10 +4,10 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 
 ## Current status
 
-- **POC is complete for PDF attachments.** CLI (Phase 1), test suite (Phase 2), web form (Phase 3), and identifier extraction (Phase 6) are all shipped.
-- **Next up: Phase 4a — Word (`.docx`) attachment support.** Excel (`.xlsx`) split into Phase 4b (deferred).
+- **POC is complete for the browser demo.** CLI (Phase 1), test suite (Phase 2), web form (Phase 3), identifier extraction (Phase 6), and Word/.docx support (Phase 4a) are all shipped and merged into `main`.
+- **Next up: Phase 7 — JSON webhook API + routing hints.** Makes the classifier callable by Zapier/Power Automate/etc. so we can automate the Monday intake board flow. See [PLAN.md §15](PLAN.md).
 - Model in use: `gemini-2.5-flash-lite`.
-- App deploys to Render via the dashboard (build: `pip install -r requirements.txt`; start: `uvicorn app:app --host 0.0.0.0 --port $PORT`; env: `GEMINI_API_KEY`, `PYTHON_VERSION=3.12.6`).
+- App deploys to Render via the dashboard (build: `pip install -r requirements.txt`; start: `uvicorn app:app --host 0.0.0.0 --port $PORT`; env: `GEMINI_API_KEY`, `PYTHON_VERSION=3.12.6` — Phase 7 will add `API_TOKEN`).
 
 ## Phase 1 — Core classifier (CLI) ✅
 
@@ -104,9 +104,22 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 - `gemini-2.5-flash-lite` returned a 503 UNAVAILABLE during initial testing (upstream Gemini demand spike). Switched to `gemini-2.5-flash` briefly to verify the classify path; not making that the default since it has lower free-tier quota. The web app's existing error handler already covers 503s gracefully.
 - Legacy `.doc` and Excel `.xlsx` remain out of scope for this phase (see [PLAN.md §11, §12](PLAN.md)).
 
+## Next up: Phase 7 — JSON webhook API + routing hints
+
+See [PLAN.md §15](PLAN.md). Rough shape:
+
+- [ ] `routing.py` — pure functions that map `(label, identifier, keyword_hits, sender_domain)` → SharePoint folder, Monday board/group hints, priority hint. No external calls.
+- [ ] `schemas.py` — pydantic request/response models (`AttachmentIn`, `ClassifyRequest`, `AttachmentResult`, `ClassifyResponse`)
+- [ ] `POST /api/classify` route in `app.py` — bearer token auth, base64 attachment decode, temp-file lifecycle, calls `classifier.classify()`, layers routing hints, builds summary
+- [ ] `API_TOKEN` env var; endpoint fails closed if unset
+- [ ] Attachment size cap (~10 MB), soft
+- [ ] Smoke test — either extend `test_cases.py` or add `test_api.py` — hits the endpoint with the change-order docx base64'd
+- [ ] Update Render env vars before merging; add a curl example to PROGRESS
+
 ## Deferred / out of scope for the POC
 
 - Phase 4b — Excel (`.xlsx`) via `openpyxl`
-- Phase 5 — Multiple attachments per email
-- Real email ingestion (Exchange/Graph/IMAP), Monday.com / SharePoint writes
+- Phase 5 — Multiple attachments per email (Phase 7 already shapes the request/response as lists; Phase 5 just lifts the cap)
+- Real email ingestion (Exchange/Graph/IMAP), Monday.com / SharePoint writes (both live upstream/downstream of this service — see PLAN.md discussion)
 - Confidence calibration; deterministic keyword-vs-LLM tie-breaker
+- Idempotency / dedup (defer until real orchestrator produces observable duplicates)

@@ -9,10 +9,11 @@
 | 1 — Core classifier (CLI) | ✅ shipped | `classifier.py` + `run_cli.py`; keyword pre-pass + Gemini structured call |
 | 2 — Test suite | ✅ shipped | `test_cases.py` runs 1 case by default (`RUN_ALL=1` runs all 7); shared `cases.py` |
 | 3 — Web form (FastAPI) | ✅ shipped | `app.py` + upload, presets, Clear, PRG, graceful error handling, model badge |
-| 6 — Identifier extraction (OP-####/AS-###) | ✅ shipped | regex pre-pass + LLM picks best candidate + rationale (chronologically shipped after Phase 3, before Phase 4) |
-| **4a — Word (.docx) attachments** | 🔜 **next** | dispatch on extension inside `extract.py`; add `python-docx`; sample docx + test case |
+| 6 — Identifier extraction (OP-####/AS-###) | ✅ shipped | regex pre-pass + LLM picks best candidate + rationale |
+| 4a — Word (.docx) attachments | ✅ shipped | dispatch on extension inside `extract.py`; `python-docx` iterates paragraphs + tables |
+| **7 — JSON webhook API + routing hints** | 🔜 **next** | `POST /api/classify` with bearer auth; base64 attachments; response includes SharePoint folder + Monday board hints so Zapier/Power Automate can drive the intake flow |
 | 4b — Excel (.xlsx) attachments | 📋 deferred | `openpyxl` sheet-flattening; sample xlsx + test case |
-| 5 — Multiple attachments per email | 📋 deferred | `classify(attachment_paths=...)`; UI multi-upload; token budget split |
+| 5 — Multiple attachments per email | 📋 deferred | request/response shapes already list-based; just lift the current 1-attachment cap |
 
 **Model in use:** `gemini-2.5-flash-lite` (free tier, higher quota than 2.5-flash for iteration).
 
@@ -592,7 +593,156 @@ to the right Monday.com / SharePoint record.
 
 ---
 
-## 15. Out of scope (deliberately) / next steps
+## 15. Phase 7 — JSON webhook API + routing hints 🔜 **next**
+
+The web form has taken us as far as manual demos can go. To automate the
+Monday intake flow, the service needs to be **callable** by Power Automate,
+Zapier, or a plain HTTP client — not just usable through a browser form.
+
+This phase adds a JSON `POST /api/classify` endpoint alongside the existing
+form UI. The form stays as a demo/QA surface; the API becomes the
+integration point.
+
+### Goals
+
+1. External orchestrators (Zapier/Power Automate/curl) can call the service and get JSON back.
+2. Response includes **routing hints** (SharePoint folder path + Monday board/group + priority) so downstream can create intake items without further logic.
+3. Endpoint is auth-gated (bearer token from env var) — no accidental open surface.
+4. Response shape is **already list-based** on attachments (`attachments: [...]`) so Phase 5 (multi-attachment) just lifts a cap, no shape churn later.
+
+### Request shape
+
+```json
+POST /api/classify
+Authorization: Bearer <API_TOKEN>
+Content-Type: application/json
+
+{
+  "sender_domain": "gc-buildwell.com",
+  "subject": "Change order CO-12 — Riverbend Commons",
+  "body": "See attached...",
+  "attachments": [
+    {
+      "filename": "Change_Order_OP-215.docx",
+      "content_base64": "<base64 bytes>"
+    }
+  ]
+}
+```
+
+- `attachments` is a list, but capped at 1 entry for this phase (matches Phase 5 deferral).
+- If `attachments` is empty, the endpoint returns `400` for now. Zero-attachment classification is a follow-up.
+
+### Response shape
+
+```json
+{
+  "email": {
+    "sender_domain": "gc-buildwell.com",
+    "subject": "Change order CO-12 — Riverbend Commons",
+    "body_length": 42
+  },
+  "attachments": [
+    {
+      "filename": "Change_Order_OP-215.docx",
+      "label": "Development / Construction",
+      "confidence": 0.98,
+      "rationale": "...",
+      "identifier": "OP-215",
+      "identifier_rationale": "...",
+      "identifier_candidates": ["OP-215"],
+      "keyword_hits": ["change order", "site work"],
+      "needs_review": false,
+      "routing": {
+        "sharepoint_folder": "/Deals/01_Active_Deals/OP-215",
+        "monday_board_hint": "Construction Intake",
+        "monday_group_hint": null,
+        "priority_hint": "high"
+      }
+    }
+  ],
+  "summary": {
+    "attachment_count": 1,
+    "distinct_identifiers": ["OP-215"],
+    "distinct_categories": ["Development / Construction"],
+    "should_fan_out": false,
+    "any_needs_review": false
+  },
+  "model": "gemini-2.5-flash-lite"
+}
+```
+
+### Routing hint logic (all deterministic, no external calls)
+
+Lives in a new `routing.py` module. Pure functions of `(label, identifier, keyword_hits, sender_domain)`:
+
+| Hint | Rule |
+|---|---|
+| `sharepoint_folder` | `identifier` starts with `OP-` → `/Deals/01_Active_Deals/OP-###`. Starts with `AS-` → `/Assets/AS-###`. Null → `/Intake/{sender_domain}/` |
+| `monday_board_hint` | Category → board name (matches Exhibit A step 4 mapping — see governance map below) |
+| `monday_group_hint` | Category → group within board (nullable) |
+| `priority_hint` | `high` if any keyword hit is in `{invoice, pay application, change order, survey, inspection, approval, permit}`; else `normal` |
+
+**Governance map** (illustrative — actual board names will match the client's Monday workspace):
+
+| Category | Monday board hint | Monday group hint |
+|---|---|---|
+| Development / Construction | Construction Intake | — |
+| Payment / Billing | Construction Intake | Payment Review |
+| Lease / Occupancy | Asset Management Intake | — |
+| Compliance / Legal | Compliance Intake | — |
+| Capital / Finance | Development Intake | — |
+| Vendor Performance | Construction Intake | Vendor Performance |
+| General Governance | General Governance Intake | — |
+
+### Auth
+
+- New env var `API_TOKEN` — a random string set on Render.
+- Endpoint reads `Authorization: Bearer <token>` header and matches exact string.
+- If `API_TOKEN` is not set at process start, the endpoint returns `500` with a clear message. Fail closed, never fail open.
+- The HTML form + `/classify` route stay unauthenticated (they're for local/demo use; not exposed to the public internet if the operator keeps the Render URL private, which is the current state).
+
+### Error responses
+
+Consistent JSON error shape: `{"error": "...", "code": "..."}`.
+
+- `400` — bad request (no attachments, invalid base64, missing required fields)
+- `401` — invalid or missing bearer token
+- `413` — attachment too large (soft cap: 10 MB per file)
+- `422` — pydantic validation error (auto-generated by FastAPI)
+- `500` — server error, missing `API_TOKEN`, or Gemini failure
+- `502` / `503` — upstream Gemini error (mapped from `google.genai.errors.ServerError`)
+
+### Implementation checklist
+
+- [ ] Add `routing.py` with `sharepoint_folder_for`, `monday_hints_for`, `priority_for`, and a top-level `compute_routing()` function
+- [ ] Add `schemas.py` (or inline in `app.py` — decide) with pydantic `AttachmentIn`, `ClassifyRequest`, `AttachmentResult`, `ClassifyResponse`
+- [ ] Add `POST /api/classify` route in `app.py` — bearer check, base64 decode → temp file, call `classifier.classify()`, layer `routing.py` output onto the result, build `summary`
+- [ ] Read `API_TOKEN` from env; fail closed if unset
+- [ ] Update `.env.example` (create if missing) to show `API_TOKEN=...`
+- [ ] Update `README` or PROGRESS.md with a curl example
+- [ ] Add a quick smoke test (either extend `test_cases.py` or a new `test_api.py`) that exercises the endpoint with the docx sample base64'd
+- [ ] Set `API_TOKEN` env var on Render before merging
+
+### Acceptance
+
+- `curl` a classify request against a local uvicorn instance → get back JSON with `label`, `identifier`, and `routing.sharepoint_folder` populated correctly.
+- Endpoint refuses requests missing or wrong bearer token with `401`.
+- Endpoint refuses requests missing `attachments` with `400`.
+- Existing web form still works (unchanged behavior).
+- Existing test suite still passes.
+
+### Out of scope for this phase
+
+- Multi-attachment (Phase 5 lifts the cap; response shape already supports it).
+- Idempotency (`(messageId, sha256(attachment))` de-dup) — deferred until a real orchestrator is calling the endpoint and duplicates become a real observed problem.
+- Rate limiting on the API endpoint — Gemini's own rate limit is the current backpressure.
+- OAuth or key rotation — bearer token from env is enough for the POC.
+- Async / callback mode — sync response works within Zapier/PA timeouts for single-attachment calls.
+
+---
+
+## 16. Out of scope (deliberately) / next steps
 
 For the POC:
 
