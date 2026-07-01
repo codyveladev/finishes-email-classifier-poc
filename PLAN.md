@@ -1,5 +1,23 @@
 # PLAN.md — Email Attachment Classifier (Proof of Concept)
 
+> Detailed build history lives in [PROGRESS.md](PROGRESS.md). This doc is the plan and the current status.
+
+## Status snapshot
+
+| Phase | Status | What it delivers |
+|---|---|---|
+| 1 — Core classifier (CLI) | ✅ shipped | `classifier.py` + `run_cli.py`; keyword pre-pass + Gemini structured call |
+| 2 — Test suite | ✅ shipped | `test_cases.py` runs 1 case by default (`RUN_ALL=1` runs all 7); shared `cases.py` |
+| 3 — Web form (FastAPI) | ✅ shipped | `app.py` + upload, presets, Clear, PRG, graceful error handling, model badge |
+| 6 — Identifier extraction (OP-####/AS-###) | ✅ shipped | regex pre-pass + LLM picks best candidate + rationale (chronologically shipped after Phase 3, before Phase 4) |
+| **4a — Word (.docx) attachments** | 🔜 **next** | dispatch on extension inside `extract.py`; add `python-docx`; sample docx + test case |
+| 4b — Excel (.xlsx) attachments | 📋 deferred | `openpyxl` sheet-flattening; sample xlsx + test case |
+| 5 — Multiple attachments per email | 📋 deferred | `classify(attachment_paths=...)`; UI multi-upload; token budget split |
+
+**Model in use:** `gemini-2.5-flash-lite` (free tier, higher quota than 2.5-flash for iteration).
+
+---
+
 ## 1. Goal
 
 Build a small, self-contained classifier that takes the signals of an incoming
@@ -14,10 +32,20 @@ mailbox, SharePoint, or Monday.com yet. Those come later.
 - keyword scan — keywords detected across subject + body + attachment text
 - `attachment_path` — **hard-coded local file path for now** (one PDF)
 
-**Output**
+**Output** (current shape, includes identifier extraction shipped in Phase 6)
 
 ```json
-{ "label": "Lease / Occupancy", "confidence": 0.91, "rationale": "...", "method": "gemini", "keyword_hits": ["lease", "tenant", "premises"] }
+{
+  "label": "Lease / Occupancy",
+  "confidence": 0.90,
+  "rationale": "...",
+  "identifier": "OP-142",
+  "identifier_rationale": "Explicitly stated as the 'Project Reference' in the attached lease.",
+  "identifier_candidates": ["OP-142"],
+  "method": "gemini",
+  "keyword_hits": ["lease", "tenant", "premises"],
+  "needs_review": false
+}
 ```
 
 The AI classifier is **Google Gemini** (free tier via Google AI Studio),
@@ -52,19 +80,21 @@ ambiguity the keywords can't).
 ## 3. How classification works
 
 ```
-inputs ──► assemble signal text ──► keyword pre-pass ──► Gemini (structured) ──► result
-           (domain+subject+         (cheap candidate     (enum label +
-            attachment text)         + hit list)          confidence + rationale)
+inputs ──► assemble signal ──► keyword + identifier pre-pass ──► Gemini (structured) ──► result
+           (domain+subject+     (cheap candidates:              (label + confidence +
+            body+attachment)     hits[], ids[])                  identifier + rationales)
 ```
 
 1. **Assemble signal text** — concatenate sender domain, subject, body, and the
    extracted attachment text into one block.
-2. **Keyword pre-pass** — scan the block against the cue lists; record hits and a
-   cheap candidate. Fast, explainable, and useful as a sanity check / fallback.
-3. **Gemini call** — send the signal text with a constrained schema; the model
-   returns the label (as an enum), a confidence (0–1), and a one-line rationale.
-4. **Combine & emit** — return the label + confidence. If confidence is below a
-   threshold (e.g. `0.60`), flag `needs_review` instead of trusting the label.
+2. **Keyword pre-pass** — scan the block against the cue lists; record hits.
+3. **Identifier pre-pass** — regex the block for `OP-####` (Deal) and `AS-###`
+   (Asset) codes; collect deduped candidates.
+4. **Gemini call** — send the signal text (with keyword hits and identifier
+   candidates included) plus a constrained schema; the model returns the label,
+   confidence (0–1), rationale, the picked identifier, and identifier rationale.
+5. **Combine & emit** — return the payload. If confidence is below the
+   threshold (`0.60`), flag `needs_review` instead of trusting the label.
 
 > ⚠️ **Confidence is self-reported by the model and is not calibrated.** Treat it
 > as a rough signal for triage, not a probability. The threshold is a product
@@ -100,26 +130,28 @@ python-multipart        # required for FastAPI form posts
 
 ---
 
-## 5. Project structure
+## 5. Project structure (as-shipped)
 
 ```
-classifier-poc/
-├── .env                  # GEMINI_API_KEY=...
+finishes-email-classifier-poc/
+├── .env                  # GEMINI_API_KEY=... (gitignored)
+├── .gitignore
 ├── requirements.txt
-├── categories.py         # the 7 labels + keyword cue map
-├── extract.py            # attachment path -> text (PDF, OCR fallback)
-├── classifier.py         # keyword pre-pass + Gemini call -> result   ← the core
-├── run_cli.py            # Phase 1: hard-coded inputs, prints label + confidence
-├── test_cases.py         # sample inputs + expected labels (Phase 2)
-├── app.py                # Phase 3: FastAPI form front end (added LAST)
+├── PLAN.md               # this doc
+├── PROGRESS.md           # build log
+├── categories.py         # 7 labels + keyword cue map + keyword_hits()
+├── extract.py            # attachment path -> text (PDF via pdfplumber → pypdf)
+├── classifier.py         # keyword + identifier pre-pass + Gemini call — THE CORE
+├── cases.py              # shared Case dataclass; single source of test cases
+├── run_cli.py            # Phase 1 CLI demo (hard-coded lease case)
+├── test_cases.py         # Phase 2 test runner (1 case by default; RUN_ALL=1 for all)
+├── app.py                # Phase 3 FastAPI form
 ├── templates/
-│   └── form.html
+│   └── form.html         # styled form with presets, upload, PRG, error block
 └── samples/
     ├── Lease_Agreement_OP-142.pdf
     └── Vendor_Agreement_AS-087.pdf
 ```
-
-Drop the two PDFs already generated into `samples/`.
 
 ---
 
@@ -144,18 +176,21 @@ print(client.models.generate_content(
     model="gemini-2.5-flash", contents="say ok").text)
 ```
 
-> **Model note:** `gemini-2.5-flash` is a safe, free-tier-eligible default.
-> A newer Flash model (e.g. `gemini-3.5-flash`) may also be on the free tier —
-> check the model list in AI Studio and set `MODEL` accordingly. Keep it in one
-> constant so it's a one-line swap.
+> **Model note:** currently running `gemini-2.5-flash-lite` — chosen for higher
+> free-tier quota (better for iteration). Any Gemini Flash variant works; swap
+> the `MODEL` constant in [classifier.py](classifier.py). The web form's model
+> badge reflects it live.
 
 ---
 
-## 7. Phase 1 — Core classifier (CLI, hard-coded input)
+## 7. Phase 1 — Core classifier (CLI, hard-coded input) ✅ shipped
 
-Build `extract.py`, then `classifier.py`, then `run_cli.py`.
+As-shipped lives in [classifier.py](classifier.py), [extract.py](extract.py),
+[categories.py](categories.py), and [run_cli.py](run_cli.py). The initial
+sketch below is preserved as historical context — the shipped code adds
+identifier extraction and per-category prompt guidance beyond this sketch.
 
-`classifier.py` (the important part):
+`classifier.py` (initial sketch — see the file for the shipped version):
 
 ```python
 import os
@@ -241,11 +276,17 @@ for the lease PDF without errors.
 
 ---
 
-## 8. Phase 2 — Test it
+## 8. Phase 2 — Test it ✅ shipped
 
-Use `test_cases.py` to run a small labeled set and check accuracy. Mix
-attachment-driven cases with subject-only cases (no attachment) to prove both
-paths.
+Runs one case (the lease) by default to save free-tier quota; `RUN_ALL=1 python
+test_cases.py` runs all 7 with a 13s delay between calls. Test data lives in
+[cases.py](cases.py); both `test_cases.py` and `app.py`'s form presets read
+from it — single source of truth.
+
+**Verified result:** 7/7 correct at last full run. Vendor agreement (case 2)
+correctly lands on Vendor Performance with a sensible rationale.
+
+Case table (also encoded in [cases.py](cases.py)):
 
 | # | sender_domain | subject | attachment | Expected label |
 |---|---------------|---------|------------|----------------|
@@ -295,14 +336,20 @@ sparingly; cache results while iterating so you don't burn quota.
 
 ---
 
-## 9. Phase 3 — Web form front end (add this LAST)
+## 9. Phase 3 — Web form front end ✅ shipped
 
-A form that **mimics receiving an email**: fields for sender domain, subject,
-body, and an attachment (a dropdown of the sample files for now). On submit it
-runs the *same* `classifier.classify()` and shows the label + confidence +
-rationale. The core stays untouched — the web layer is a thin wrapper.
+As-shipped lives in [app.py](app.py) + [templates/form.html](templates/form.html).
+Substantially richer than the original sketch:
 
-`app.py` (FastAPI):
+- **File upload** (PDF today; docx/xlsx once Phase 4 ships) — beats the sample dropdown when both are set
+- **Preset dropdown** — all 7 cases from [cases.py](cases.py); selecting locks form fields
+- **Clear** link — resets to a blank form
+- **Post-Redirect-Get** — POST stashes result in a UUID-keyed in-memory cache and returns 303 → `/?rid=<uuid>`. GET reads-and-pops. Reload no longer re-fires the API.
+- **Graceful error handling** — 429/403/API/server/unknown errors render in a red block rather than 500
+- **Branded header + live model badge** pulled from `classifier.MODEL`
+- **Python 3.14 compatibility fixes** — Jinja2 template cache disabled; new Starlette `TemplateResponse(request, name, ctx)` signature
+
+Initial `app.py` sketch (preserved for reference — actual shipped version is richer):
 
 ```python
 from dotenv import load_dotenv; load_dotenv()
@@ -378,72 +425,83 @@ uvicorn app:app --reload      # open http://127.0.0.1:8000
 
 ## 10. Definition of done (POC)
 
-- [ ] `run_cli.py` classifies the lease PDF and prints label + confidence.
-- [ ] `test_cases.py` runs the labeled set; unambiguous cases pass; ambiguous
-      case (vendor agreement) shows a sensible rationale and lower confidence.
-- [ ] Low-confidence results are flagged `needs_review` rather than mislabeled.
-- [ ] The web form classifies a simulated email end to end.
+- [x] `run_cli.py` classifies the lease PDF and prints label + confidence.
+- [x] `test_cases.py` runs the labeled set; unambiguous cases pass; ambiguous
+      case (vendor agreement) shows a sensible rationale.
+- [x] Low-confidence results are flagged `needs_review` rather than mislabeled.
+- [x] The web form classifies a simulated email end to end.
+- [x] Extracts `OP-####` / `AS-###` project identifiers alongside classification.
 
-## 11. Phase 4 — Word + Excel attachment support (planned)
+**POC is complete for PDF attachments.** Next phase adds Word document support.
 
-PDF only is fine for the POC, but real inboxes carry `.docx` and `.xlsx`
-attachments constantly (rent rolls, invoices, vendor agreements, budgets).
-This phase extends `extract.py` to handle them. The classifier itself does
-not change — `classify()` already calls `extract_text(path)` and treats the
-result as a blob of text.
+## 11. Phase 4a — Word (`.docx`) attachment support 🔜 **next**
+
+Real inboxes carry `.docx` constantly (vendor agreements, letters, memos).
+This phase extends `extract.py` to handle it. The classifier does **not**
+change — `classify()` already treats `extract_text()` output as an opaque
+text blob.
+
+**Note:** Excel (`.xlsx`) is split out into Phase 4b (deferred). Doing docx
+first keeps the surface small and lets us prove the dispatcher pattern
+before adding the spreadsheet flattening logic (which has its own token /
+layout tradeoffs).
 
 ### Approach
 
-Dispatch on file extension inside `extract_text()`:
+Refactor `extract.py` into a dispatcher on file extension:
 
 | Extension | Library | Notes |
 |---|---|---|
 | `.pdf` | `pdfplumber` → `pypdf` fallback | already implemented |
-| `.docx` | `python-docx` | extract paragraphs **and** table cells (easy to miss tables) |
-| `.xlsx` | `openpyxl` | iterate sheets; flatten each row as tab-joined cells; prefix with sheet name |
-| `.csv` | stdlib `csv` | read rows as text |
-| `.doc` / `.xls` (legacy) | — | **out of scope.** Return `""` + log a warning. Needs LibreOffice headless or `pywin32`; real-estate folks still send these so revisit later. |
+| `.docx` | `python-docx` | extract paragraphs **and** table cells (missing tables is the classic mistake) |
+| `.doc` (legacy) | — | out of scope. Return `""` + log. Needs LibreOffice headless or `pywin32`. |
 | anything else | — | return `""` |
 
-### Design notes
+### Implementation sketch
 
-- **Excel "text" is awkward.** Spreadsheets aren't prose. For classification we
-  only need keywords to surface, so flattening `Sheet: Invoices\n4471\tNet 30\t$12,400`
-  is enough. Do **not** try to preserve layout.
-- **Token budget.** A 50-sheet financial model could blow past the 6000-char
-  signal truncation. Add a soft per-file cap (~50k chars) at extraction time
-  before the existing truncation in `build_signal()`.
-- **Word tables.** `python-docx` exposes `.paragraphs` and `.tables` separately;
-  iterate both or table content is silently dropped.
-- **Refactor.** Split `extract.py` into an `extract_text()` dispatcher plus
-  `_extract_pdf`, `_extract_docx`, `_extract_xlsx`, `_extract_csv` helpers.
-
-### Requirements additions
-
-```
-python-docx
-openpyxl
-```
+- Add `python-docx` to `requirements.txt`
+- Split `extract.py` into `extract_text()` dispatcher + `_extract_pdf`, `_extract_docx`
+- `_extract_docx` iterates both `doc.paragraphs` and `doc.tables` (cells → newline-joined rows)
+- Apply a soft per-file cap (~50k chars) before the existing 6000-char signal truncation in `build_signal()`
+- Update the file-upload input's `accept` attribute in the form to include `.docx`
 
 ### Test additions
 
-Phase 2 currently covers PDF + no-attachment only. To prove the new paths,
-add at least:
+- Add one `.docx` sample to `samples/` (e.g. a vendor agreement in Word matching the existing PDF vendor case)
+- Add a corresponding case to [cases.py](cases.py) → `Vendor Performance` or `Compliance / Legal`
+- Verify the identifier regex still finds `OP-####` / `AS-###` inside extracted docx text
 
-- one `.docx` case (e.g. a vendor agreement in Word) → Vendor Performance
-- one `.xlsx` case (e.g. a rent roll or invoice spreadsheet) → Payment / Billing or Lease / Occupancy
+### Acceptance
 
-Sample files can be generated programmatically or dropped in by hand.
+- Upload a `.docx` in the web form → gets classified with sensible label + rationale
+- The new test case passes when run via `test_cases.py`
+- Extracted text includes both paragraph and table content (verify with a docx that has a table)
 
 ### Open decisions
 
-1. Generate sample `.docx` / `.xlsx` programmatically, or use real-world examples?
-2. Confirm legacy `.doc` / `.xls` stay out of scope for now.
-3. Confirm 50k-char per-file extraction cap (before the 6k signal truncation).
+1. Generate the sample `.docx` programmatically or use a real one?
+2. Confirm 50k-char per-file extraction cap.
+3. Legacy `.doc` stays out of scope — confirm.
 
 ---
 
-## 12. Phase 5 — Multiple attachments per email (planned)
+## 12. Phase 4b — Excel (`.xlsx`) attachment support (deferred)
+
+Same dispatcher pattern. Uses `openpyxl` to walk sheets and flatten each row
+as tab-joined cells, prefixed with the sheet name.
+
+**Design note — spreadsheets aren't prose.** For classification we only need
+keywords to surface, so flattening `Sheet: Invoices\n4471\tNet 30\t$12,400`
+is enough. Do **not** try to preserve layout.
+
+**Watch for:** a 50-sheet financial model blowing past the 50k-char per-file
+cap. Truncate at the sheet boundary rather than mid-row.
+
+Deferred until docx is in and stable.
+
+---
+
+## 13. Phase 5 — Multiple attachments per email (deferred)
 
 Real emails often carry several attachments (e.g. an invoice PDF + a backup
 spreadsheet). The POC currently accepts **one** attachment path; this phase
@@ -490,7 +548,7 @@ extends the system to handle N.
 
 ---
 
-## 13. Phase 6 — Project / Deal / Asset identifier extraction ✅
+## 14. Phase 6 — Project / Deal / Asset identifier extraction ✅ shipped
 
 Most emails reference a specific deal or asset by an internal code. We extract
 that code alongside the category so downstream automation can route the email
@@ -534,9 +592,18 @@ to the right Monday.com / SharePoint record.
 
 ---
 
-## 14. Out of scope (deliberately) / next steps
+## 15. Out of scope (deliberately) / next steps
 
-- Real email ingestion (Gmail/IMAP polling), file upload instead of a fixed path.
-- Project resolution (OP-### / AS-### + address matching).
-- Writing results to Monday.com / SharePoint.
-- Confidence calibration and a deterministic keyword-vs-LLM tie-breaker.
+For the POC:
+
+- Real email ingestion (Exchange/Graph/IMAP polling)
+- Project resolution against a real registry (fuzzy match on names/addresses)
+- Writing results to Monday.com / SharePoint
+- Confidence calibration and a deterministic keyword-vs-LLM tie-breaker
+- Multi-attachment per email (planned as Phase 5)
+
+The POC intentionally proves the *classification brain* in isolation. The
+downstream MVP (email capture → SharePoint filing → Monday intake, with a
+triage lane) is described in a separate outline; this POC exists to
+de-risk the AI piece so that outline's classifier + identifier steps have
+already been proven.

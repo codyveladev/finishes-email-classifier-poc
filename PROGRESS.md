@@ -2,6 +2,13 @@
 
 Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](PLAN.md)).
 
+## Current status
+
+- **POC is complete for PDF attachments.** CLI (Phase 1), test suite (Phase 2), web form (Phase 3), and identifier extraction (Phase 6) are all shipped.
+- **Next up: Phase 4a — Word (`.docx`) attachment support.** Excel (`.xlsx`) split into Phase 4b (deferred).
+- Model in use: `gemini-2.5-flash-lite`.
+- App deploys to Render via the dashboard (build: `pip install -r requirements.txt`; start: `uvicorn app:app --host 0.0.0.0 --port $PORT`; env: `GEMINI_API_KEY`, `PYTHON_VERSION=3.12.6`).
+
 ## Phase 1 — Core classifier (CLI) ✅
 
 - [x] Confirm sample PDFs in `samples/`
@@ -71,12 +78,29 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 - [x] [app.py](app.py) builds `PRESETS` from `cases.CASES`
 - [x] [test_cases.py](test_cases.py) imports `cases.CASES`; runs **one case by default** to conserve free-tier quota — set `RUN_ALL=1` to run all 7 with the 13s/req delay
 
-## Future plans added to PLAN.md
+## Docs alignment pass ✅
 
-- **Phase 4** ([PLAN.md §11](PLAN.md)) — Word + Excel attachment support
-- **Phase 5** ([PLAN.md §12](PLAN.md)) — Multiple attachments per email
+- [x] Rewrote PLAN.md status snapshot at the top of the file
+- [x] Marked shipped phases as ✅ with pointers to the actual files
+- [x] Updated project structure to match the current tree (includes `cases.py`, `PROGRESS.md`, no `smoke_test.py`)
+- [x] Fixed the model note (now `gemini-2.5-flash-lite`)
+- [x] Split Phase 4 into 4a (Word/docx — next) and 4b (Excel/xlsx — deferred)
+- [x] Checked off the Definition of Done in PLAN §10
 
-## Next steps (deferred / out of scope)
+## Next up: Phase 4a — Word (`.docx`) attachment support
 
-- Real email ingestion (Gmail/IMAP), Monday.com / SharePoint writes.
-- Confidence calibration; deterministic keyword-vs-LLM tie-breaker.
+See [PLAN.md §11](PLAN.md). Rough shape:
+
+- [ ] Add `python-docx` to `requirements.txt`
+- [ ] Refactor `extract.py` into dispatcher + `_extract_pdf` + `_extract_docx` (iterate paragraphs **and** tables)
+- [ ] Apply 50k-char per-file soft cap before the existing 6000-char signal truncation
+- [ ] Add one `.docx` sample and matching case to `cases.py`
+- [ ] Extend the form's file upload `accept` to include `.docx`
+- [ ] Verify identifier regex still hits `OP-####` / `AS-###` in docx-extracted text
+
+## Deferred / out of scope for the POC
+
+- Phase 4b — Excel (`.xlsx`) via `openpyxl`
+- Phase 5 — Multiple attachments per email
+- Real email ingestion (Exchange/Graph/IMAP), Monday.com / SharePoint writes
+- Confidence calibration; deterministic keyword-vs-LLM tie-breaker
