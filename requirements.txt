@@ -2,6 +2,7 @@ google-genai
 pydantic
 pdfplumber
 pypdf
+python-docx
 python-dotenv
 fastapi
 uvicorn[standard]
