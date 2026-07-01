@@ -63,6 +63,14 @@ CASES: list[Case] = [
         expected=("Development / Construction",),
     ),
     Case(
+        name="Change Order — Riverbend Commons (OP-215, .docx)",
+        sender_domain="gc-buildwell.com",
+        subject="Change Order CO-12 — Riverbend Commons Bldg B slab revision",
+        body="",
+        attachment="samples/Change_Order_OP-215.docx",
+        expected=("Development / Construction",),
+    ),
+    Case(
         name="Board minutes (no attachment)",
         sender_domain="admin@ourfirm.com",
         subject="Board meeting minutes — March",

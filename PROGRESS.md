@@ -87,16 +87,22 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 - [x] Split Phase 4 into 4a (Word/docx — next) and 4b (Excel/xlsx — deferred)
 - [x] Checked off the Definition of Done in PLAN §10
 
-## Next up: Phase 4a — Word (`.docx`) attachment support
+## Phase 4a — Word (`.docx`) attachment support ✅
 
-See [PLAN.md §11](PLAN.md). Rough shape:
+- [x] Added `python-docx` to `requirements.txt` (v1.2.0)
+- [x] Added sample `samples/Change_Order_OP-215.docx` (Development/Construction category, prose paragraphs + line-items table, `OP-215` identifier)
+- [x] Refactored [extract.py](extract.py) into `extract_text()` dispatcher + `_extract_pdf` + `_extract_docx`; unknown extensions return `""`
+- [x] `_extract_docx` iterates both `doc.paragraphs` and `doc.tables` (rows joined with tabs)
+- [x] Added 50k-char per-file soft cap (`MAX_CHARS_PER_FILE`) before the 6000-char `build_signal()` truncation
+- [x] Added case to [cases.py](cases.py) — "Change Order — Riverbend Commons (OP-215, .docx)" → `Development / Construction`
+- [x] Added the docx to the web form's `SAMPLES` dropdown and extended the file-upload `accept` attribute
+- [x] **Acceptance:** end-to-end classify of the new docx case → `Development / Construction` @ 100%, identifier `OP-215` extracted correctly, rationale references construction indicators from both paragraph text (RFIs, submittals) and table contents.
 
-- [ ] Add `python-docx` to `requirements.txt`
-- [ ] Refactor `extract.py` into dispatcher + `_extract_pdf` + `_extract_docx` (iterate paragraphs **and** tables)
-- [ ] Apply 50k-char per-file soft cap before the existing 6000-char signal truncation
-- [ ] Add one `.docx` sample and matching case to `cases.py`
-- [ ] Extend the form's file upload `accept` to include `.docx`
-- [ ] Verify identifier regex still hits `OP-####` / `AS-###` in docx-extracted text
+### Notes
+
+- Verified during testing: extractor pulls both paragraph text *and* table content. A paragraphs-only extractor would silently lose the cost breakdown table — worth remembering for future formats.
+- `gemini-2.5-flash-lite` returned a 503 UNAVAILABLE during initial testing (upstream Gemini demand spike). Switched to `gemini-2.5-flash` briefly to verify the classify path; not making that the default since it has lower free-tier quota. The web app's existing error handler already covers 503s gracefully.
+- Legacy `.doc` and Excel `.xlsx` remain out of scope for this phase (see [PLAN.md §11, §12](PLAN.md)).
 
 ## Deferred / out of scope for the POC
 

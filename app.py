@@ -23,8 +23,9 @@ templates.env.cache = None  # workaround: Jinja2 3.1.6 LRU cache trips on Python
 
 SAMPLES = {
     "— none —": "",
-    "Lease (OP-142)": "samples/Lease_Agreement_OP-142.pdf",
-    "Vendor Agreement (AS-087)": "samples/Vendor_Agreement_AS-087.pdf",
+    "Lease (OP-142) — PDF": "samples/Lease_Agreement_OP-142.pdf",
+    "Vendor Agreement (AS-087) — PDF": "samples/Vendor_Agreement_AS-087.pdf",
+    "Change Order (OP-215) — Word": "samples/Change_Order_OP-215.docx",
 }
 
 # Presets built from the shared CASES list — single source of truth shared with test_cases.py.
