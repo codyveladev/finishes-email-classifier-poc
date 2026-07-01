@@ -104,17 +104,37 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 - `gemini-2.5-flash-lite` returned a 503 UNAVAILABLE during initial testing (upstream Gemini demand spike). Switched to `gemini-2.5-flash` briefly to verify the classify path; not making that the default since it has lower free-tier quota. The web app's existing error handler already covers 503s gracefully.
 - Legacy `.doc` and Excel `.xlsx` remain out of scope for this phase (see [PLAN.md §11, §12](PLAN.md)).
 
-## Next up: Phase 7 — JSON webhook API + routing hints
+## Phase 7 — JSON webhook API + routing hints ✅
 
-See [PLAN.md §15](PLAN.md). Rough shape:
+- [x] [routing.py](routing.py) — pure functions mapping `(label, identifier, keyword_hits, sender_domain)` → SharePoint folder + Monday board/group + priority hint. No external calls; illustrative board names ready to be replaced with real workspace names.
+- [x] [schemas.py](schemas.py) — pydantic `AttachmentIn`, `ClassifyRequest`, `AttachmentResult`, `RoutingHints`, `EmailContext`, `Summary`, `ClassifyResponse`, `ApiError`.
+- [x] `POST /api/classify` in [app.py](app.py) — bearer auth, base64 decode, 10 MB per-file cap, temp-file lifecycle, calls `classifier.classify()`, layers routing hints, builds summary.
+- [x] `API_TOKEN` env var; endpoint fails closed with 500 if unset, 401 if wrong.
+- [x] Graceful error mapping: 429 rate limit → 429, 403 upstream → 502, 503 upstream → 503, other Gemini errors → 502, unknown exceptions → 500. Structured `{ "error", "code" }` bodies.
+- [x] [test_api.py](test_api.py) — 18 assertions covering auth, validation, error paths, stubbed happy path, and a live Gemini smoke call. Set `SKIP_LIVE=1` to skip the live call.
+- [x] [.env.example](.env.example) — documents `GEMINI_API_KEY` + `API_TOKEN`.
+- [ ] Set `API_TOKEN` env var on Render before merging (paste any long random string).
 
-- [ ] `routing.py` — pure functions that map `(label, identifier, keyword_hits, sender_domain)` → SharePoint folder, Monday board/group hints, priority hint. No external calls.
-- [ ] `schemas.py` — pydantic request/response models (`AttachmentIn`, `ClassifyRequest`, `AttachmentResult`, `ClassifyResponse`)
-- [ ] `POST /api/classify` route in `app.py` — bearer token auth, base64 attachment decode, temp-file lifecycle, calls `classifier.classify()`, layers routing hints, builds summary
-- [ ] `API_TOKEN` env var; endpoint fails closed if unset
-- [ ] Attachment size cap (~10 MB), soft
-- [ ] Smoke test — either extend `test_cases.py` or add `test_api.py` — hits the endpoint with the change-order docx base64'd
-- [ ] Update Render env vars before merging; add a curl example to PROGRESS
+### Curl example
+
+```bash
+# Base64-encode a sample once
+B64=$(base64 -w0 samples/Change_Order_OP-215.docx)
+
+curl -X POST http://127.0.0.1:8000/api/classify \
+  -H "Authorization: Bearer <your API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"sender_domain\": \"gc-buildwell.com\",
+    \"subject\": \"Change Order CO-12 — Riverbend Commons\",
+    \"body\": \"\",
+    \"attachments\": [
+      {\"filename\": \"Change_Order_OP-215.docx\", \"content_base64\": \"$B64\"}
+    ]
+  }"
+```
+
+Response shape and routing hint contract are documented in [PLAN.md §15](PLAN.md).
 
 ## Deferred / out of scope for the POC
 

@@ -1,17 +1,28 @@
-"""Phase 3: FastAPI web form. Wraps classifier.classify() — core unchanged."""
+"""Phase 3: FastAPI web form. Phase 7: JSON webhook API alongside.
+Both wrap classifier.classify() — core unchanged."""
 
+import base64
+import os
 import tempfile
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv; load_dotenv()
 
-from fastapi import FastAPI, Form, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Form, Request, UploadFile, File, Header, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import classifier
+import routing
 from cases import CASES
+from schemas import (
+    ApiError, AttachmentResult, ClassifyRequest, ClassifyResponse,
+    EmailContext, RoutingHints, Summary,
+)
 from google.genai import errors as genai_errors
+
+API_TOKEN = os.environ.get("API_TOKEN")  # None → endpoint fails closed
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024   # 10 MB soft cap per file
 
 # One-shot result cache: POST writes, GET reads-and-pops. Prevents reload-resubmit
 # from re-firing the classifier (which would burn free-tier API quota).
@@ -120,3 +131,115 @@ async def do_classify(
     }
     # 303 forces the browser to GET; reloading the GET is harmless (cache already popped).
     return RedirectResponse(url=f"/?rid={rid}", status_code=303)
+
+
+# ---------- Phase 7: JSON webhook API ----------
+
+def _api_err(status: int, code: str, msg: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": msg, "code": code})
+
+
+@app.post("/api/classify")
+def api_classify(
+    payload: ClassifyRequest,
+    authorization: str | None = Header(default=None),
+):
+    # Auth — fail closed if the token is not configured or does not match.
+    if not API_TOKEN:
+        return _api_err(500, "server_misconfigured",
+                        "API_TOKEN env var is not set on the server.")
+    if authorization != f"Bearer {API_TOKEN}":
+        return _api_err(401, "unauthorized",
+                        "Missing or invalid Authorization header (expected 'Bearer <API_TOKEN>').")
+
+    if not payload.attachments:
+        return _api_err(400, "no_attachments",
+                        "attachments must contain at least one file "
+                        "(zero-attachment classification is not yet supported).")
+    if len(payload.attachments) > 1:
+        return _api_err(400, "multi_attachment_unsupported",
+                        "Phase 7 caps attachments at 1. Multi-attachment is Phase 5.")
+
+    att_in = payload.attachments[0]
+
+    try:
+        data = base64.b64decode(att_in.content_base64, validate=True)
+    except Exception:
+        return _api_err(400, "invalid_base64",
+                        f"attachments[0].content_base64 could not be decoded for '{att_in.filename}'.")
+
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        return _api_err(413, "attachment_too_large",
+                        f"'{att_in.filename}' is {len(data)} bytes; the limit is {MAX_ATTACHMENT_BYTES}.")
+
+    suffix = Path(att_in.filename).suffix or ".bin"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp.write(data)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+
+    try:
+        result = classifier.classify(
+            payload.sender_domain, payload.subject, payload.body, str(tmp_path),
+        )
+    except genai_errors.ClientError as e:
+        code = getattr(e, "code", None) or getattr(e, "status_code", None)
+        if code == 429:
+            return _api_err(429, "rate_limited",
+                            "Gemini free-tier rate limit hit. Wait ~30s and retry.")
+        if code == 403:
+            return _api_err(502, "upstream_denied",
+                            "Gemini API denied the request. Check the server's API key.")
+        return _api_err(502, "upstream_error", f"Gemini API error ({code}): {e}")
+    except genai_errors.ServerError as e:
+        return _api_err(503, "upstream_unavailable",
+                        f"Gemini upstream is temporarily unavailable: {e}")
+    except genai_errors.APIError as e:
+        return _api_err(502, "upstream_error", f"Gemini API error: {e}")
+    except Exception as e:
+        return _api_err(500, "internal_error",
+                        f"{type(e).__name__}: {e}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    # Layer routing hints onto the classifier result.
+    hints = routing.compute_routing(
+        label=result["label"],
+        identifier=result["identifier"],
+        keyword_hits=result["keyword_hits"],
+        sender_domain=payload.sender_domain,
+    )
+
+    att_result = AttachmentResult(
+        filename=att_in.filename,
+        label=result["label"],
+        confidence=result["confidence"],
+        rationale=result["rationale"],
+        identifier=result["identifier"],
+        identifier_rationale=result["identifier_rationale"],
+        identifier_candidates=result["identifier_candidates"],
+        keyword_hits=result["keyword_hits"],
+        needs_review=result["needs_review"],
+        routing=RoutingHints(**hints),
+    )
+
+    distinct_ids = [att_result.identifier] if att_result.identifier else []
+    distinct_cats = [att_result.label]
+
+    response = ClassifyResponse(
+        email=EmailContext(
+            sender_domain=payload.sender_domain,
+            subject=payload.subject,
+            body_length=len(payload.body),
+        ),
+        attachments=[att_result],
+        summary=Summary(
+            attachment_count=1,
+            distinct_identifiers=distinct_ids,
+            distinct_categories=distinct_cats,
+            should_fan_out=False,   # single attachment; Phase 5 computes real value
+            any_needs_review=att_result.needs_review,
+        ),
+        model=classifier.MODEL,
+    )
+    return response
