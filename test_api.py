@@ -14,6 +14,7 @@ os.environ["API_TOKEN"] = TEST_TOKEN
 
 from starlette.testclient import TestClient
 import app
+import classifier   # monkey-patched below to stub out live Gemini calls
 
 client = TestClient(app.app)
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
@@ -57,8 +58,8 @@ def stub_email_only(sender_domain, subject, body, attachment_path):
         "identifier_candidates": [], "method": "gemini",
         "keyword_hits": [], "needs_review": False,
     }
-_orig_for_zero = app.classifier.classify
-app.classifier.classify = stub_email_only
+_orig_for_zero = classifier.classify
+classifier.classify = stub_email_only
 r = client.post("/api/classify",
                 json={"sender_domain": "x.com", "subject": "s", "body": "", "attachments": []},
                 headers=AUTH)
@@ -68,7 +69,7 @@ check("email-only: single result with sentinel filename",
       len(data["attachments"]) == 1 and data["attachments"][0]["filename"] == "(email body)")
 check("email-only: routing falls back to /Intake/",
       data["attachments"][0]["routing"]["sharepoint_folder"].startswith("/Intake/"))
-app.classifier.classify = _orig_for_zero  # restore
+classifier.classify = _orig_for_zero  # restore
 
 # 4. Two attachments (Phase 7 cap) -> 400
 too_many = sample_payload()
@@ -101,8 +102,8 @@ def stub_classify(sender_domain, subject, body, attachment_path):
         "keyword_hits": ["change order", "site work"],
         "needs_review": False,
     }
-_orig = app.classifier.classify
-app.classifier.classify = stub_classify
+_orig = classifier.classify
+classifier.classify = stub_classify
 
 r = client.post("/api/classify", json=sample_payload(), headers=AUTH)
 data = r.json()
@@ -119,9 +120,9 @@ check("priority hint is high (change order keyword)",
       att["routing"]["priority_hint"] == "high")
 check("summary is single-item",
       data["summary"]["attachment_count"] == 1 and not data["summary"]["should_fan_out"])
-check("model echoed", data["model"] == app.classifier.MODEL)
+check("model echoed", data["model"] == classifier.MODEL)
 
-app.classifier.classify = _orig  # restore
+classifier.classify = _orig  # restore
 
 # 8. LIVE — real Gemini call (skip with SKIP_LIVE=1)
 if os.environ.get("SKIP_LIVE") == "1":
