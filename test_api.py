@@ -47,11 +47,28 @@ r = client.post("/api/classify", json=sample_payload(),
                 headers={"Authorization": "Bearer wrong"})
 check("bad token -> 401", r.status_code == 401)
 
-# 3. Empty attachments -> 400
+# 3. Empty attachments -> 200 with sentinel filename (zero-attachment path)
+#    Stub the classifier so this doesn't cost a live API call.
+def stub_email_only(sender_domain, subject, body, attachment_path):
+    assert attachment_path is None, "expected zero-attachment path to pass None"
+    return {
+        "label": "General Governance", "confidence": 0.7, "rationale": "stubbed email-only",
+        "identifier": None, "identifier_rationale": "no identifier",
+        "identifier_candidates": [], "method": "gemini",
+        "keyword_hits": [], "needs_review": False,
+    }
+_orig_for_zero = app.classifier.classify
+app.classifier.classify = stub_email_only
 r = client.post("/api/classify",
                 json={"sender_domain": "x.com", "subject": "s", "body": "", "attachments": []},
                 headers=AUTH)
-check("no attachments -> 400", r.status_code == 400 and r.json()["code"] == "no_attachments")
+check("no attachments -> 200 (email-only)", r.status_code == 200)
+data = r.json()
+check("email-only: single result with sentinel filename",
+      len(data["attachments"]) == 1 and data["attachments"][0]["filename"] == "(email body)")
+check("email-only: routing falls back to /Intake/",
+      data["attachments"][0]["routing"]["sharepoint_folder"].startswith("/Intake/"))
+app.classifier.classify = _orig_for_zero  # restore
 
 # 4. Two attachments (Phase 7 cap) -> 400
 too_many = sample_payload()
