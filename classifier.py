@@ -23,7 +23,7 @@ def find_identifiers(text: str) -> list[str]:
             out.append(ident)
     return out
 
-MODEL = "gemini-2.5-flash-lite"
+MODEL = "gemini-2.5-flash"
 CONFIDENCE_THRESHOLD = 0.60
 
 Label = Literal[
