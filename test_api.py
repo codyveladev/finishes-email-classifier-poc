@@ -120,8 +120,8 @@ check("sharepoint hint uses OP prefix",
       email["sharepoint_folder"] == "/Deals/01_Active_Deals/OP-215")
 check("monday board hint from category",
       email["monday_board_hint"] == "Construction Intake")
-check("priority hint is high (change order keyword)",
-      email["priority_hint"] == "high")
+check("priority hint is High (change order keyword)",
+      email["priority_hint"] == "High")
 check("single project -> no multi-project flag",
       email["multiple_projects_detected"] is False)
 check("confident single project -> no review",

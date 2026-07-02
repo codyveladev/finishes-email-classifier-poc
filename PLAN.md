@@ -657,7 +657,7 @@ never individually classified.
     "identifier_candidates": ["OP-215"],
 
     "keyword_hits": ["change order", "site work"],
-    "priority_hint": "high",
+    "priority_hint": "High",
     "monday_board_hint": "Construction Intake",
     "monday_group_hint": null,
     "sharepoint_folder": "/Deals/01_Active_Deals/OP-215",
@@ -698,7 +698,7 @@ Lives in a new `routing.py` module. Pure functions of `(label, identifier, keywo
 | `sharepoint_folder` | `identifier` starts with `OP-` → `/Deals/01_Active_Deals/OP-###`. Starts with `AS-` → `/Assets/AS-###`. Null → `/Intake/{sender_domain}/` |
 | `monday_board_hint` | Category → board name (matches Exhibit A step 4 mapping — see governance map below) |
 | `monday_group_hint` | Category → group within board (nullable) |
-| `priority_hint` | `high` if any keyword hit is in `{invoice, pay application, change order, survey, inspection, approval, permit}`; else `normal` |
+| `priority_hint` | `High` if any keyword hit is in `{invoice, pay application, change order, survey, inspection, approval, permit}`; else `Normal` — title-cased to map directly onto Monday status labels |
 
 **Governance map** (illustrative — actual board names will match the client's Monday workspace):
 

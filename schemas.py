@@ -52,7 +52,7 @@ class EmailResult(BaseModel):
 
     # Evidence + routing hints (deterministic, computed in routing.py).
     keyword_hits: list[str]
-    priority_hint: str                      # "high" | "normal" (Exhibit A step 5 keywords)
+    priority_hint: str                      # "High" | "Normal" — cased to match Monday status labels
     monday_board_hint: str
     monday_group_hint: Optional[str]
     sharepoint_folder: str                  # suggested destination for ALL attachments on this email
