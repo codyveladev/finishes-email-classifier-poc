@@ -111,6 +111,7 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 - [x] `POST /api/classify` in [app.py](app.py) — bearer auth, base64 decode, 10 MB per-file cap, temp-file lifecycle, calls `classifier.classify()`, layers routing hints, builds summary.
 - [x] `API_TOKEN` env var; endpoint fails closed with 500 if unset, 401 if wrong.
 - [x] Graceful error mapping: 429 rate limit → 429, 403 upstream → 502, 503 upstream → 503, other Gemini errors → 502, unknown exceptions → 500. Structured `{ "error", "code" }` bodies.
+- [x] Zero-attachment support: empty `attachments` array classifies subject + body only, mirroring the web form's "— none —" option. Response uses `"(email body)"` as the sentinel filename so downstream consumers read from `attachments[0]` uniformly.
 - [x] [test_api.py](test_api.py) — 18 assertions covering auth, validation, error paths, stubbed happy path, and a live Gemini smoke call. Set `SKIP_LIVE=1` to skip the live call.
 - [x] [.env.example](.env.example) — documents `GEMINI_API_KEY` + `API_TOKEN`.
 - [ ] Set `API_TOKEN` env var on Render before merging (paste any long random string).

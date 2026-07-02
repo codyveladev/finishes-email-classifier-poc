@@ -630,8 +630,8 @@ Content-Type: application/json
 }
 ```
 
-- `attachments` is a list, but capped at 1 entry for this phase (matches Phase 5 deferral).
-- If `attachments` is empty, the endpoint returns `400` for now. Zero-attachment classification is a follow-up.
+- `attachments` is a list, but capped at 1 entry for this phase (Phase 5 lifts the cap).
+- If `attachments` is empty, the classifier runs on subject + body only — same behavior as the web form's "— none —" sample. The response's `attachments[0]` uses `"(email body)"` as a sentinel filename so downstream consumers don't need to branch on the zero-attachment case.
 
 ### Response shape
 

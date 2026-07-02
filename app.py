@@ -152,35 +152,39 @@ def api_classify(
         return _api_err(401, "unauthorized",
                         "Missing or invalid Authorization header (expected 'Bearer <API_TOKEN>').")
 
-    if not payload.attachments:
-        return _api_err(400, "no_attachments",
-                        "attachments must contain at least one file "
-                        "(zero-attachment classification is not yet supported).")
     if len(payload.attachments) > 1:
         return _api_err(400, "multi_attachment_unsupported",
                         "Phase 7 caps attachments at 1. Multi-attachment is Phase 5.")
 
-    att_in = payload.attachments[0]
+    # Zero-attachment path — classify subject + body only.
+    # Sentinel filename in the result keeps the response shape uniform for
+    # downstream consumers that always read from attachments[0].
+    att_in = payload.attachments[0] if payload.attachments else None
+    tmp_path: Path | None = None
+    display_filename = "(email body)"
 
-    try:
-        data = base64.b64decode(att_in.content_base64, validate=True)
-    except Exception:
-        return _api_err(400, "invalid_base64",
-                        f"attachments[0].content_base64 could not be decoded for '{att_in.filename}'.")
+    if att_in is not None:
+        display_filename = att_in.filename
+        try:
+            data = base64.b64decode(att_in.content_base64, validate=True)
+        except Exception:
+            return _api_err(400, "invalid_base64",
+                            f"attachments[0].content_base64 could not be decoded for '{att_in.filename}'.")
 
-    if len(data) > MAX_ATTACHMENT_BYTES:
-        return _api_err(413, "attachment_too_large",
-                        f"'{att_in.filename}' is {len(data)} bytes; the limit is {MAX_ATTACHMENT_BYTES}.")
+        if len(data) > MAX_ATTACHMENT_BYTES:
+            return _api_err(413, "attachment_too_large",
+                            f"'{att_in.filename}' is {len(data)} bytes; the limit is {MAX_ATTACHMENT_BYTES}.")
 
-    suffix = Path(att_in.filename).suffix or ".bin"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    tmp.write(data)
-    tmp.close()
-    tmp_path = Path(tmp.name)
+        suffix = Path(att_in.filename).suffix or ".bin"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(data)
+        tmp.close()
+        tmp_path = Path(tmp.name)
 
     try:
         result = classifier.classify(
-            payload.sender_domain, payload.subject, payload.body, str(tmp_path),
+            payload.sender_domain, payload.subject, payload.body,
+            str(tmp_path) if tmp_path else None,
         )
     except genai_errors.ClientError as e:
         code = getattr(e, "code", None) or getattr(e, "status_code", None)
@@ -200,7 +204,8 @@ def api_classify(
         return _api_err(500, "internal_error",
                         f"{type(e).__name__}: {e}")
     finally:
-        tmp_path.unlink(missing_ok=True)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
     # Layer routing hints onto the classifier result.
     hints = routing.compute_routing(
@@ -211,7 +216,7 @@ def api_classify(
     )
 
     att_result = AttachmentResult(
-        filename=att_in.filename,
+        filename=display_filename,
         label=result["label"],
         confidence=result["confidence"],
         rationale=result["rationale"],
