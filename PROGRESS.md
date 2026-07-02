@@ -153,6 +153,23 @@ Response shape and routing hint contract are documented in [PLAN.md §15](PLAN.m
 
 No behavior change — pure structural refactor.
 
+## Response shape v2 ✅ — email-level classification
+
+The v1 API response classified "per attachment," which implied N labels per
+email. Wrong model: downstream creates **one intake item per email**, so the
+email is the unit of classification. Attachments are evidence, not outputs.
+
+- [x] [schemas.py](schemas.py) — `EmailResult` carries label, confidence, identifier, keyword hits, and all routing hints flat at email level. `AttachmentAnalyzed` is a slim audit record (filename, size, `identifiers_found`) with no label/confidence. Dropped the `summary` block and nested `routing` object entirely.
+- [x] [routers/api.py](routers/api.py) — extracts attachment text in the router (single extraction, reused for both the per-file identifier scan and the classify call via the new `attachment_text` parameter on `classifier.classify()`).
+- [x] **Multi-project detection** — `email.multiple_projects_detected` is true when >1 distinct identifier appears across subject + body + attachments. Forces `needs_review = true` even at high confidence, since splitting an intake item is a human decision.
+- [x] **`review_reasons`** — stable machine-readable slugs (`low_confidence`, `multiple_projects_detected`) so orchestrators can branch on *why* something needs review, and the triage board can show the reason.
+- [x] [classifier.py](classifier.py) — `classify()` / `build_signal()` accept optional pre-extracted `attachment_text`; path-based callers (web form, CLI, test_cases) unchanged.
+- [x] [test_api.py](test_api.py) — rewritten for the new shape: 27 assertions including multi-project and low-confidence stub cases. All passing, live call included.
+
+**Breaking change for Zapier/Power Automate mappings:** field paths moved from
+`attachments[0].label` / `attachments[0].routing.*` to `email.label` /
+`email.*`. Update any existing Zap field mappings after merging.
+
 ## Deferred / out of scope for the POC
 
 - Phase 4b — Excel (`.xlsx`) via `openpyxl`

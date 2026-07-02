@@ -635,42 +635,59 @@ Content-Type: application/json
 
 ### Response shape
 
+The **email is the unit of classification** — one call returns one label,
+one identifier, and one set of routing hints, ready to become one Monday
+intake item. Attachments are evidence: each is scanned for project
+identifiers (so multi-project emails can be flagged for human triage) but
+never individually classified.
+
 ```json
 {
   "email": {
     "sender_domain": "gc-buildwell.com",
     "subject": "Change order CO-12 — Riverbend Commons",
-    "body_length": 42
+    "body_length": 42,
+
+    "label": "Development / Construction",
+    "confidence": 0.98,
+    "rationale": "...",
+
+    "identifier": "OP-215",
+    "identifier_rationale": "...",
+    "identifier_candidates": ["OP-215"],
+
+    "keyword_hits": ["change order", "site work"],
+    "priority_hint": "high",
+    "monday_board_hint": "Construction Intake",
+    "monday_group_hint": null,
+    "sharepoint_folder": "/Deals/01_Active_Deals/OP-215",
+
+    "multiple_projects_detected": false,
+    "needs_review": false,
+    "review_reasons": []
   },
-  "attachments": [
+  "attachments_analyzed": [
     {
       "filename": "Change_Order_OP-215.docx",
-      "label": "Development / Construction",
-      "confidence": 0.98,
-      "rationale": "...",
-      "identifier": "OP-215",
-      "identifier_rationale": "...",
-      "identifier_candidates": ["OP-215"],
-      "keyword_hits": ["change order", "site work"],
-      "needs_review": false,
-      "routing": {
-        "sharepoint_folder": "/Deals/01_Active_Deals/OP-215",
-        "monday_board_hint": "Construction Intake",
-        "monday_group_hint": null,
-        "priority_hint": "high"
-      }
+      "size_bytes": 36428,
+      "identifiers_found": ["OP-215"]
     }
   ],
-  "summary": {
-    "attachment_count": 1,
-    "distinct_identifiers": ["OP-215"],
-    "distinct_categories": ["Development / Construction"],
-    "should_fan_out": false,
-    "any_needs_review": false
-  },
-  "model": "gemini-2.5-flash-lite"
+  "model": "gemini-2.5-flash"
 }
 ```
+
+**Triage flags:**
+
+- `multiple_projects_detected` — true when >1 distinct identifier appears
+  across subject + body + attachments. The classifier picks the best single
+  identifier anyway; the human decides whether to split the intake item at
+  approval time. `attachments_analyzed[i].identifiers_found` shows which
+  file references which project, making the split actionable.
+- `needs_review` — true when `review_reasons` is non-empty. Downstream
+  branches on this boolean; `review_reasons` explains why with stable slugs:
+  `low_confidence` (model confidence below threshold) and
+  `multiple_projects_detected`.
 
 ### Routing hint logic (all deterministic, no external calls)
 

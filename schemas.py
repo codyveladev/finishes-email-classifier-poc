@@ -1,7 +1,9 @@
 """Pydantic request / response models for POST /api/classify.
 
-Kept separate from app.py so the schemas are re-usable (docs, tests, other
-consumers) without dragging in the FastAPI app object.
+Shape philosophy: the EMAIL is the unit of classification. One email in,
+one label + one identifier + one set of routing hints out. Attachments are
+evidence the classifier reads — they are analyzed (identifier scan) but never
+individually classified, because downstream creates one intake item per email.
 """
 
 from typing import Optional
@@ -21,51 +23,59 @@ class ClassifyRequest(BaseModel):
     body: str = Field("", description="Plain-text email body (optional)")
     attachments: list[AttachmentIn] = Field(
         default_factory=list,
-        description="One or more attachments. Phase 7 caps this at 1; "
-                    "Phase 5 will lift the cap without shape churn.",
+        description="Attachments to read as classification evidence. "
+                    "Empty list = classify from subject + body alone. "
+                    "Currently capped at 1; Phase 5 lifts the cap.",
     )
 
 
 # ---------- Response ----------
 
-class RoutingHints(BaseModel):
-    sharepoint_folder: str
-    monday_board_hint: str
-    monday_group_hint: Optional[str]
-    priority_hint: str  # "high" | "normal"
+class EmailResult(BaseModel):
+    """The single classification record for this email — everything a
+    downstream orchestrator needs to create one Monday intake item."""
 
-
-class AttachmentResult(BaseModel):
-    filename: str
-    label: str
-    confidence: float
-    rationale: str
-    identifier: Optional[str]
-    identifier_rationale: str
-    identifier_candidates: list[str]
-    keyword_hits: list[str]
-    needs_review: bool
-    routing: RoutingHints
-
-
-class EmailContext(BaseModel):
+    # Echo of the request, so later Zap/flow steps don't re-read earlier steps.
     sender_domain: str
     subject: str
     body_length: int
 
+    # Classification (LLM).
+    label: str
+    confidence: float                       # model self-report; use needs_review for decisions
+    rationale: str
 
-class Summary(BaseModel):
-    attachment_count: int
-    distinct_identifiers: list[str]
-    distinct_categories: list[str]
-    should_fan_out: bool
-    any_needs_review: bool
+    # Project / asset identifier (regex candidates, LLM picks the best).
+    identifier: Optional[str]               # e.g. "OP-215" (Deal) or "AS-087" (Asset)
+    identifier_rationale: str
+    identifier_candidates: list[str]        # every code found across subject/body/attachments
+
+    # Evidence + routing hints (deterministic, computed in routing.py).
+    keyword_hits: list[str]
+    priority_hint: str                      # "high" | "normal" (Exhibit A step 5 keywords)
+    monday_board_hint: str
+    monday_group_hint: Optional[str]
+    sharepoint_folder: str                  # suggested destination for ALL attachments on this email
+
+    # Triage flags.
+    multiple_projects_detected: bool        # >1 distinct identifier found — human should consider splitting
+    needs_review: bool                      # true if ANY review_reasons entry exists
+    review_reasons: list[str]               # machine-readable slugs, e.g. ["low_confidence"]
+
+
+class AttachmentAnalyzed(BaseModel):
+    """Audit record of one attachment the classifier ingested. Deliberately
+    carries no label or confidence — attachments are evidence, not outputs.
+    identifiers_found tells the reviewer which file references which project,
+    which is what makes a multi-project split actionable."""
+    filename: str
+    size_bytes: int
+    identifiers_found: list[str]            # regex hits within THIS file's text only
 
 
 class ClassifyResponse(BaseModel):
-    email: EmailContext
-    attachments: list[AttachmentResult]
-    summary: Summary
+    email: EmailResult
+    attachments_analyzed: list[AttachmentAnalyzed]
     model: str
 
 
