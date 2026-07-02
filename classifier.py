@@ -80,8 +80,14 @@ PROMPT = (
 
 
 def build_signal(sender_domain: str, subject: str, body: str,
-                 attachment_path: Optional[str]) -> tuple[str, list[str], list[str]]:
-    att = extract_text(attachment_path) if attachment_path else ""
+                 attachment_path: Optional[str],
+                 attachment_text: Optional[str] = None) -> tuple[str, list[str], list[str]]:
+    # attachment_text lets callers that already extracted the file (e.g. the API
+    # router, which scans each attachment for identifiers) skip a second extraction.
+    if attachment_text is not None:
+        att = attachment_text
+    else:
+        att = extract_text(attachment_path) if attachment_path else ""
     combined = f"{subject}\n{body}\n{att}"
     hits = keyword_hits(combined)
     ids = find_identifiers(combined)
@@ -97,8 +103,10 @@ def build_signal(sender_domain: str, subject: str, body: str,
 
 
 def classify(sender_domain: str, subject: str, body: str = "",
-             attachment_path: Optional[str] = None) -> dict:
-    signal, hits, ids = build_signal(sender_domain, subject, body, attachment_path)
+             attachment_path: Optional[str] = None,
+             attachment_text: Optional[str] = None) -> dict:
+    signal, hits, ids = build_signal(sender_domain, subject, body,
+                                     attachment_path, attachment_text)
     resp = client.models.generate_content(
         model=MODEL,
         contents=PROMPT + signal,

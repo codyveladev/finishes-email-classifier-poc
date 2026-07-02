@@ -64,11 +64,15 @@ def monday_hints_for(label: str) -> tuple[str, Optional[str]]:
 
 
 def priority_for(keyword_hits: list[str]) -> str:
-    """Return 'high' if any hit is a priority keyword, else 'normal'."""
+    """Return 'High' if any hit is a priority keyword, else 'Normal'.
+
+    Title-cased to match Monday status-column labels, so orchestrators can
+    map the value straight into the Priority column without reformatting.
+    """
     for hit in keyword_hits:
         if hit.lower() in _PRIORITY_KEYWORDS:
-            return "high"
-    return "normal"
+            return "High"
+    return "Normal"
 
 
 def compute_routing(
