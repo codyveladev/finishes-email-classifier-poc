@@ -664,6 +664,7 @@ never individually classified.
 
     "multiple_projects_detected": false,
     "needs_review": false,
+    "needs_review_text": "No",
     "review_reasons": []
   },
   "attachments_analyzed": [

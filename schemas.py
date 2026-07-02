@@ -60,6 +60,7 @@ class EmailResult(BaseModel):
     # Triage flags.
     multiple_projects_detected: bool        # >1 distinct identifier found — human should consider splitting
     needs_review: bool                      # true if ANY review_reasons entry exists
+    needs_review_text: str                  # "Yes" | "No" — same flag, cased for Monday status columns
     review_reasons: list[str]               # machine-readable slugs, e.g. ["low_confidence"]
 
 

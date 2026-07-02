@@ -126,6 +126,8 @@ check("single project -> no multi-project flag",
       email["multiple_projects_detected"] is False)
 check("confident single project -> no review",
       email["needs_review"] is False and email["review_reasons"] == [])
+check("needs_review_text mirrors the boolean (No)",
+      email["needs_review_text"] == "No")
 check("attachment analyzed with identifiers",
       len(data["attachments_analyzed"]) == 1
       and data["attachments_analyzed"][0]["identifiers_found"] == ["OP-215"])
@@ -146,6 +148,8 @@ check("multi-project: forces needs_review even at high confidence",
       email["needs_review"] is True)
 check("multi-project: reason slug present",
       email["review_reasons"] == ["multiple_projects_detected"])
+check("multi-project: needs_review_text mirrors the boolean (Yes)",
+      email["needs_review_text"] == "Yes")
 
 # ---------- Low confidence (stubbed) ----------
 

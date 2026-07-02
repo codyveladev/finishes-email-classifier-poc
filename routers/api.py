@@ -124,6 +124,7 @@ def classify_email(
         sharepoint_folder=hints["sharepoint_folder"],
         multiple_projects_detected=multiple_projects,
         needs_review=bool(review_reasons),
+        needs_review_text="Yes" if review_reasons else "No",
         review_reasons=review_reasons,
     )
 
