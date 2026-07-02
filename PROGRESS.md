@@ -137,6 +137,22 @@ curl -X POST http://127.0.0.1:8000/api/classify \
 
 Response shape and routing hint contract are documented in [PLAN.md §15](PLAN.md).
 
+## Refactor pass ✅ — FastAPI structure
+
+`app.py` had grown to ~250 lines with three concerns tangled (form, API, PRG cache, exception mapping, config). Split into focused modules following FastAPI best practices:
+
+- [x] [config.py](config.py) — `Settings` model + cached `get_settings()`; all env reads in one place.
+- [x] [dependencies.py](dependencies.py) — `verify_bearer` using `HTTPBearer` scheme (also gives `/docs` an Authorize button).
+- [x] [errors.py](errors.py) — `ApiException` + `api_exception_handler` + Gemini-exception translators for both API and form paths.
+- [x] [attachment_io.py](attachment_io.py) — `temp_file_from_bytes()` context manager, reused by both routes.
+- [x] [routers/web.py](routers/web.py) — form GET/POST + PRG cache + `SAMPLES` + `PRESETS`.
+- [x] [routers/api.py](routers/api.py) — JSON endpoint, protected by `Depends(verify_bearer)`; router-level dependency means auth is one line to add to future protected endpoints.
+- [x] [app.py](app.py) — down to 23 lines. Just: load env, create `FastAPI()`, register exception handler, include routers.
+- [x] `test_api.py` — updated `app.classifier.*` monkey-patch targets to patch `classifier.*` directly (same module object, cleaner import path).
+- [x] **Acceptance:** 20/20 API tests pass, web form still renders correctly with model badge + presets.
+
+No behavior change — pure structural refactor.
+
 ## Deferred / out of scope for the POC
 
 - Phase 4b — Excel (`.xlsx`) via `openpyxl`
