@@ -170,10 +170,31 @@ email is the unit of classification. Attachments are evidence, not outputs.
 `attachments[0].label` / `attachments[0].routing.*` to `email.label` /
 `email.*`. Update any existing Zap field mappings after merging.
 
+## Phase 5 — Multiple attachments + multipart transport ✅
+
+Driven by the Outlook trigger: real emails carry several attachments, and
+Zapier only hydrates file fields natively in form-data payloads. Both problems,
+one piece of work.
+
+- [x] [service.py](service.py) — new module holding the transport-agnostic pipeline. Both routes normalize to `IncomingFile(filename, data)` and call `run_classification()`.
+- [x] [routers/api.py](routers/api.py) — `POST /api/classify` (JSON+base64) cap lifted; new `POST /api/classify-upload` (multipart) for Zapier. Both thin; validation shared.
+- [x] **Even budget split** — each attachment gets `ATTACHMENT_TEXT_BUDGET // N` prompt chars in a `--- ATTACHMENT: {filename} ---` block, so one long file can't crowd the others out.
+- [x] **Full-text identifier scan** — per-file regex runs on complete extracted text, not the trimmed prompt text. New `identifier_candidates` param on `classify()` carries the complete union through, so a code buried deep in a long doc still reaches the reviewer.
+- [x] **Attachment cap** — `MAX_ATTACHMENTS` (default 10) → `400 too_many_attachments`. Guards the fan-out cost risk.
+- [x] [test_api.py](test_api.py) — 36 stubbed assertions + live call. Multi-project case uses both real samples (change order `OP-215` + lease `OP-142`) with only the LLM stubbed, so the regex/attribution logic is genuinely exercised.
+- [x] **Acceptance:** two-file email correctly attributes `OP-215` to the change order and `OP-142` to the lease, unions both into candidates, trips `multiple_projects_detected`, and forces `needs_review` despite 98% confidence. Multipart route returns an identical shape to JSON. CLI and web form unaffected.
+
+### For the Zapier Outlook flow
+
+The Code step, hydrate-URL fetch, and base64 encoding all go away. Use
+**Webhooks by Zapier → POST**, Payload Type **`form`**, URL
+`/api/classify-upload`, and map the Outlook attachment field directly into an
+`attachments` key. Zapier hydrates the files and streams them as real multipart
+parts. Bearer header unchanged.
+
 ## Deferred / out of scope for the POC
 
 - Phase 4b — Excel (`.xlsx`) via `openpyxl`
-- Phase 5 — Multiple attachments per email (Phase 7 already shapes the request/response as lists; Phase 5 just lifts the cap)
 - Real email ingestion (Exchange/Graph/IMAP), Monday.com / SharePoint writes (both live upstream/downstream of this service — see PLAN.md discussion)
 - Confidence calibration; deterministic keyword-vs-LLM tie-breaker
 - Idempotency / dedup (defer until real orchestrator produces observable duplicates)

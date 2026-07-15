@@ -24,8 +24,7 @@ class ClassifyRequest(BaseModel):
     attachments: list[AttachmentIn] = Field(
         default_factory=list,
         description="Attachments to read as classification evidence. "
-                    "Empty list = classify from subject + body alone. "
-                    "Currently capped at 1; Phase 5 lifts the cap.",
+                    "Empty list = classify from subject + body alone.",
     )
 
 
@@ -40,24 +39,21 @@ class EmailResult(BaseModel):
     subject: str
     body_length: int
 
-    # Classification (LLM).
     label: str
     confidence: float                       # model self-report; use needs_review for decisions
     rationale: str
 
-    # Project / asset identifier (regex candidates, LLM picks the best).
     identifier: Optional[str]               # e.g. "OP-215" (Deal) or "AS-087" (Asset)
     identifier_rationale: str
     identifier_candidates: list[str]        # every code found across subject/body/attachments
 
-    # Evidence + routing hints (deterministic, computed in routing.py).
+    # Routing hints below are deterministic, computed in routing.py.
     keyword_hits: list[str]
     priority_hint: str                      # "High" | "Normal" — cased to match Monday status labels
     monday_board_hint: str
     monday_group_hint: Optional[str]
     sharepoint_folder: str                  # suggested destination for ALL attachments on this email
 
-    # Triage flags.
     multiple_projects_detected: bool        # >1 distinct identifier found — human should consider splitting
     needs_review: bool                      # true if ANY review_reasons entry exists
     needs_review_text: str                  # "Yes" | "No" — same flag, cased for Monday status columns
