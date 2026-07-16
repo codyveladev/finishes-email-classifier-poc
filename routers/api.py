@@ -4,17 +4,19 @@ Two transports, one pipeline:
 
 - POST /api/classify         JSON body, attachments base64-encoded.
                              For Power Automate, curl, anything that can build JSON.
-- POST /api/classify-upload  multipart/form-data, attachments as real file parts.
-                             For Zapier, which hydrates file fields natively in
-                             form payloads but degrades them to URLs in JSON.
+- POST /api/classify-upload  multipart/form-data, attachments as real file parts
+                             under any field name. For Zapier, whose webhook
+                             only hydrates files via its own "File" field, and
+                             names the resulting part on its terms, not ours.
 
 Both normalize to service.IncomingFile and hand off to run_classification().
 """
 
 import base64
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 import service
 from config import Settings, get_settings
@@ -80,20 +82,25 @@ def classify_json(
 
 @router.post("/classify-upload", response_model=ClassifyResponse)
 async def classify_upload(
+    request: Request,
     sender_domain: str = Form(...),
     subject: str = Form(...),
     body: str = Form(""),
-    attachments: list[UploadFile] = File(default=[]),
     settings: Settings = Depends(get_settings),
 ) -> ClassifyResponse | JSONResponse:
+    # Take file parts under ANY field name rather than a declared `attachments`
+    # param. Clients name the part after their own field, not ours — Zapier's
+    # webhook calls it "file", Power Automate lets you pick, curl uses whatever
+    # -F says. Non-file parts (including Zapier's unhydrated token strings) are
+    # ignored rather than erroring, so a misconfigured mapping degrades to a
+    # subject+body classification instead of a 422.
+    form = await request.form()
     files: list[IncomingFile] = []
-    for upload in attachments:
-        # Zapier sends an empty part when a file field maps to nothing; skip
-        # those rather than classifying a zero-byte "attachment".
-        if not upload.filename:
+    for _, value in form.multi_items():
+        if not isinstance(value, StarletteUploadFile) or not value.filename:
             continue
-        data = await upload.read()
+        data = await value.read()
         if data:
-            files.append(IncomingFile(filename=upload.filename, data=data))
+            files.append(IncomingFile(filename=value.filename, data=data))
 
     return _run(sender_domain, subject, body, files, settings)

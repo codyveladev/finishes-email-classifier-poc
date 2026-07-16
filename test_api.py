@@ -221,6 +221,43 @@ r = client.post(
 check("multipart: no files -> 200 (email-only)",
       r.status_code == 200 and r.json()["attachments_analyzed"] == [])
 
+# Clients name the file part themselves — Zapier's webhook calls it "file".
+# Any field name must work, and several names at once must all land.
+r = client.post(
+    "/api/classify-upload",
+    data={"sender_domain": "gc-buildwell.com", "subject": "Zapier-style", "body": ""},
+    files=[("file", ("Change_Order_OP-215.docx", read_bytes(CHANGE_ORDER)))],
+    headers=AUTH,
+)
+check("multipart: file part named 'file' still lands",
+      r.status_code == 200 and len(r.json()["attachments_analyzed"]) == 1)
+
+r = client.post(
+    "/api/classify-upload",
+    data={"sender_domain": "gc-buildwell.com", "subject": "Mixed names", "body": ""},
+    files=[
+        ("file", ("Change_Order_OP-215.docx", read_bytes(CHANGE_ORDER))),
+        ("attachment_2", ("Lease_Agreement_OP-142.pdf", read_bytes(LEASE))),
+    ],
+    headers=AUTH,
+)
+data = r.json()
+check("multipart: files under differing names all land",
+      r.status_code == 200 and len(data["attachments_analyzed"]) == 2)
+check("multipart: mixed-name files still trip multi-project",
+      data["email"]["multiple_projects_detected"] is True)
+
+# A client that fails to hydrate sends the token as a text part. Ignore it and
+# degrade to subject+body rather than 422-ing the whole request.
+r = client.post(
+    "/api/classify-upload",
+    data={"sender_domain": "x.com", "subject": "Unhydrated",
+          "attachments": "hydrate|||.eJytUN1umzAUfhdfJxGg0kCkSnNCoFSQhJasa26QMQ54gE3ALLAq735It1eYJd985_s75xNRKRQTKlFjw9AK|||hydrate"},
+    headers=AUTH,
+)
+check("multipart: unhydrated token string ignored, not an error",
+      r.status_code == 200 and r.json()["attachments_analyzed"] == [])
+
 classifier.classify = _real_classify
 
 # ---------- Live Gemini call ----------
