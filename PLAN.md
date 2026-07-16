@@ -11,9 +11,9 @@
 | 3 — Web form (FastAPI) | ✅ shipped | `app.py` + upload, presets, Clear, PRG, graceful error handling, model badge |
 | 6 — Identifier extraction (OP-####/AS-###) | ✅ shipped | regex pre-pass + LLM picks best candidate + rationale |
 | 4a — Word (.docx) attachments | ✅ shipped | dispatch on extension inside `extract.py`; `python-docx` iterates paragraphs + tables |
-| **7 — JSON webhook API + routing hints** | 🔜 **next** | `POST /api/classify` with bearer auth; base64 attachments; response includes SharePoint folder + Monday board hints so Zapier/Power Automate can drive the intake flow |
+| 7 — JSON webhook API + routing hints | ✅ shipped | `POST /api/classify` with bearer auth; base64 attachments; response carries SharePoint folder + Monday board hints |
+| 5 — Multiple attachments + multipart | ✅ shipped | cap lifted to 10/email; per-file identifier scan; `POST /api/classify-upload` (multipart) for Zapier's native file handling |
 | 4b — Excel (.xlsx) attachments | 📋 deferred | `openpyxl` sheet-flattening; sample xlsx + test case |
-| 5 — Multiple attachments per email | 📋 deferred | request/response shapes already list-based; just lift the current 1-attachment cap |
 
 **Model in use:** `gemini-2.5-flash-lite` (free tier, higher quota than 2.5-flash for iteration).
 
@@ -502,50 +502,52 @@ Deferred until docx is in and stable.
 
 ---
 
-## 13. Phase 5 — Multiple attachments per email (deferred)
+## 13. Phase 5 — Multiple attachments + multipart transport ✅ shipped
 
-Real emails often carry several attachments (e.g. an invoice PDF + a backup
-spreadsheet). The POC currently accepts **one** attachment path; this phase
-extends the system to handle N.
+Real emails carry several attachments, which made the 1-per-request cap the
+blocker for any real inbox trigger. Shipped alongside a multipart endpoint,
+because the two problems turned out to be one piece of work: Zapier's Outlook
+trigger yields multiple files, and Zapier only hydrates file fields natively
+in **form-data** payloads (in JSON they degrade to URL strings).
 
-### Design questions to settle first
+### Two transports, one pipeline
 
-1. **One label per email, or one per attachment?** Most likely "one label per
-   email" — an email is a single event in the property-manager's workflow. So
-   attachments get concatenated into the signal text, not classified
-   independently. Multi-label per email is a different product.
-2. **Concatenation strategy.** Each attachment's extracted text is prefixed
-   with `--- ATTACHMENT: {filename} ---` so the model can tell them apart and
-   reference them in the rationale.
-3. **Token budget.** The current 6000-char attachment truncation in
-   `build_signal()` has to become a *total* budget split across N attachments —
-   either even split (`6000 / N` each) or first-come-first-served. Probably
-   first-come, since the first attachment is usually the primary one.
-4. **Keyword hits aggregation.** `keyword_hits()` already operates on a single
-   text blob — feed it the concatenated text; no change needed.
-5. **UI.** The form's file input becomes `<input type="file" multiple>` and
-   the sample dropdown becomes a multi-select (or a checkbox list of samples).
-   The result UI lists which files contributed.
+| Endpoint | Body | Built for |
+|---|---|---|
+| `POST /api/classify` | JSON, attachments base64-encoded | Power Automate, curl, anything that can build JSON |
+| `POST /api/classify-upload` | `multipart/form-data`, attachments as real file parts | Zapier — map the trigger's file field straight in, no Code step |
 
-### Implementation sketch
+Both normalize their input to `service.IncomingFile` and hand off to
+`service.run_classification()`. Same response shape from either.
 
-- `classifier.classify()` signature changes from
-  `attachment_path: Optional[str]` to `attachment_paths: list[str] | None`.
-  Keep a single-path shim for backwards compatibility with `run_cli.py` and
-  `test_cases.py`.
-- `build_signal()` loops over paths, calls `extract_text()` per file, and
-  emits a labeled block per attachment.
-- FastAPI route accepts `List[UploadFile]`; each file gets a temp path; all
-  paths cleaned up in `finally`.
-- Test cases gain a "multi-attachment" row (e.g. invoice PDF + payment
-  spreadsheet → Payment / Billing).
+### Decisions made
 
-### Open decisions
+1. **One label per email** — confirmed. Attachments are evidence, never
+   individually classified. The response shape didn't change at all from the
+   single-attachment version, which is why this phase was cheap.
+2. **Even budget split, not first-come.** Each attachment gets
+   `ATTACHMENT_TEXT_BUDGET // N` characters of prompt space, labeled with
+   `--- ATTACHMENT: {filename} ---`. First-come would have let one long
+   document crowd every other attachment out of the signal entirely.
+3. **Identifier scanning uses full text, not the trimmed prompt text.** Each
+   file is regex-scanned at full length for `attachments_analyzed[].identifiers_found`,
+   and the union feeds `identifier_candidates` via a new `identifier_candidates`
+   parameter on `classify()`. Otherwise a project code buried deep in a long
+   document would vanish from the reviewer's view purely because of prompt budget.
+4. **Cap of 10 attachments per email** (`MAX_ATTACHMENTS` env var). A reply-all
+   thread with 40 files should be rejected loudly (`400 too_many_attachments`)
+   rather than quietly running up an LLM bill.
+5. **Web form left single-file.** It's a demo/QA surface; multi-upload there
+   would add UI work for no product value.
 
-1. Confirm "one label per email" (not per attachment).
-2. Confirm first-come truncation strategy for the 6000-char budget.
-3. Confirm UI pattern: multi-file upload + multi-select samples (vs. a
-   separate "attachments" repeating row).
+### Where multi-project detection got real
+
+With one attachment, `multiple_projects_detected` could only fire on codes in
+the subject/body. With N attachments it does the job it was designed for:
+change order (`OP-215`) + lease (`OP-142`) in one email now trips the flag and
+forces `needs_review`, with `attachments_analyzed[].identifiers_found` showing
+the reviewer exactly which file belongs to which project — which is what makes
+splitting the intake item actionable.
 
 ---
 
