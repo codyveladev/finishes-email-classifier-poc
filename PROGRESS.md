@@ -4,10 +4,22 @@ Tracking build progress for the Email Attachment Classifier POC (see [PLAN.md](P
 
 ## Current status
 
-- **POC is complete for the browser demo.** CLI (Phase 1), test suite (Phase 2), web form (Phase 3), identifier extraction (Phase 6), and Word/.docx support (Phase 4a) are all shipped and merged into `main`.
-- **Next up: Phase 7 — JSON webhook API + routing hints.** Makes the classifier callable by Zapier/Power Automate/etc. so we can automate the Monday intake board flow. See [PLAN.md §15](PLAN.md).
-- Model in use: `gemini-2.5-flash-lite`.
-- App deploys to Render via the dashboard (build: `pip install -r requirements.txt`; start: `uvicorn app:app --host 0.0.0.0 --port $PORT`; env: `GEMINI_API_KEY`, `PYTHON_VERSION=3.12.6` — Phase 7 will add `API_TOKEN`).
+**The full pipeline runs end to end against a real mailbox.** Outlook → Power
+Automate → SharePoint → this classifier → Zapier → Monday intake board.
+See **[INTEGRATION.md](INTEGRATION.md)** for how it's wired, the exact
+expressions, and the traps.
+
+Verified: an email with three PDFs (`OP-118`, `OP-142`, `AS-087`) files all
+three to SharePoint, extracts text from inside each one, unions the identifiers,
+trips `multiple_projects_detected`, and lands a flagged item on the board.
+
+- All classifier phases shipped: CLI, test suite, web form, identifier
+  extraction, Word/.docx, JSON + multipart API, multi-attachment.
+- Model: `gemini-2.5-flash`.
+- Deployed on Render (build: `pip install -r requirements.txt`; start:
+  `uvicorn app:app --host 0.0.0.0 --port $PORT`; env: `GEMINI_API_KEY`,
+  `API_TOKEN`, `PYTHON_VERSION=3.12.6`).
+- Known gaps and next steps: [INTEGRATION.md §7](INTEGRATION.md).
 
 ## Phase 1 — Core classifier (CLI) ✅
 
