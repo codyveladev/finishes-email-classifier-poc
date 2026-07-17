@@ -7,6 +7,7 @@ real. The final case makes one live Gemini call; set SKIP_LIVE=1 to skip it.
 """
 
 import base64
+import json
 import os
 from dotenv import load_dotenv; load_dotenv()
 
@@ -102,6 +103,27 @@ bad = payload()
 bad["attachments"][0]["content_base64"] = "not valid base64!!!"
 r = client.post("/api/classify", json=bad, headers=AUTH)
 check("json: bad base64 -> 400", r.status_code == 400 and r.json()["code"] == "invalid_base64")
+check("json: bad base64 error names the file and shows a preview",
+      "Change_Order_OP-215.docx" in r.json()["error"] and "starting with" in r.json()["error"])
+
+# Orchestrators wrap base64 in their own shapes. Decode should see through all
+# of them rather than rejecting otherwise-good payloads.
+from routers.api import decode_attachment_base64
+
+raw = read_bytes(CHANGE_ORDER)
+clean_b64 = base64.b64encode(raw).decode("ascii")
+
+check("decode: plain base64", decode_attachment_base64(clean_b64) == raw)
+check("decode: line-wrapped at 76 chars (default of many encoders)",
+      decode_attachment_base64(base64.encodebytes(raw).decode("ascii")) == raw)
+check("decode: surrounding whitespace",
+      decode_attachment_base64(f"\n  {clean_b64}  \n") == raw)
+check("decode: Power Automate binary envelope",
+      decode_attachment_base64(
+          json.dumps({"$content-type": "application/pdf", "$content": clean_b64})) == raw)
+check("decode: data URI prefix",
+      decode_attachment_base64(f"data:application/pdf;base64,{clean_b64}") == raw)
+check("decode: missing padding", decode_attachment_base64(clean_b64.rstrip("=")) == raw)
 
 missing = payload()
 del missing["sender_domain"]
