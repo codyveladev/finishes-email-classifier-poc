@@ -38,6 +38,7 @@ Label = Literal[
     "Capital / Finance",
     "Vendor Performance",
     "General Governance",
+    "Unclassified",
 ]
 
 
@@ -70,8 +71,14 @@ PROMPT = (
     "budgets, investor distributions.\n"
     "- Vendor Performance: vendor/supplier service agreements, SLAs, scopes "
     "of work, maintenance contracts, work orders, KPIs.\n"
-    "- General Governance: board minutes, policies, memos, resolutions, "
-    "internal correspondence (default catch-all).\n\n"
+    "- General Governance: board minutes, policies, memos, resolutions, and "
+    "internal correspondence about running the organization. This requires "
+    "POSITIVE governance signals — do NOT use it as a dumping ground for "
+    "anything that doesn't fit elsewhere.\n"
+    "- Unclassified: use this when the email does not clearly belong to any "
+    "category above — spam, personal notes, newsletters, out-of-scope "
+    "messages, or anything too vague to place. Prefer Unclassified over "
+    "forcing a weak fit. A human will triage these.\n\n"
     "Identifier extraction:\n"
     "- OP-#### codes (e.g. OP-142) identify a Deal.\n"
     "- AS-### codes (e.g. AS-087) identify an Asset.\n"
