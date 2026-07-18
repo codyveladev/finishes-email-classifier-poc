@@ -17,6 +17,11 @@ from schemas import AttachmentAnalyzed, ClassifyResponse, EmailResult
 # don't rename them once a Zap or Power Automate flow depends on them.
 REASON_LOW_CONFIDENCE = "low_confidence"
 REASON_MULTIPLE_PROJECTS = "multiple_projects_detected"
+REASON_UNCLASSIFIED = "unclassified"
+
+# The catch-all label. When the model lands here it could not place the email,
+# so it always warrants a human look regardless of self-reported confidence.
+UNCLASSIFIED_LABEL = "Unclassified"
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,10 @@ def run_classification(sender_domain: str, subject: str, body: str,
     multiple_projects = len(all_identifiers) > 1
     if multiple_projects:
         review_reasons.append(REASON_MULTIPLE_PROJECTS)
+    # The model couldn't place the email — always a human's call, even if it
+    # reported high confidence in giving up.
+    if result["label"] == UNCLASSIFIED_LABEL:
+        review_reasons.append(REASON_UNCLASSIFIED)
 
     email_result = EmailResult(
         sender_domain=sender_domain,

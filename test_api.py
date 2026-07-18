@@ -205,6 +205,17 @@ email = r.json()["email"]
 check("low confidence: needs_review true", email["needs_review"] is True)
 check("low confidence: reason slug present", "low_confidence" in email["review_reasons"])
 
+# ---------- Unclassified always triages, even at high confidence ----------
+
+classifier.classify = make_stub(label="Unclassified", confidence=0.95, needs_review=False)
+r = client.post("/api/classify", json=payload(), headers=AUTH)
+email = r.json()["email"]
+check("unclassified: needs_review forced true despite high confidence",
+      email["needs_review"] is True and email["needs_review_text"] == "Yes")
+check("unclassified: reason slug present", email["review_reasons"] == ["unclassified"])
+check("unclassified: routes to Triage board",
+      email["monday_board_hint"] == "Triage")
+
 # ---------- Multipart transport ----------
 
 classifier.classify = make_stub()

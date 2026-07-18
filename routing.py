@@ -23,6 +23,7 @@ _MONDAY_HINTS: dict[str, tuple[str, Optional[str]]] = {
     "Capital / Finance":          ("Development Intake", None),
     "Vendor Performance":         ("Construction Intake", "Vendor Performance"),
     "General Governance":         ("General Governance Intake", None),
+    "Unclassified":               ("Triage", None),
 }
 
 # Keywords that promote an item to high priority (from Exhibit A step 5).
@@ -58,9 +59,10 @@ def sharepoint_folder_for(identifier: Optional[str], sender_domain: str) -> str:
 
 
 def monday_hints_for(label: str) -> tuple[str, Optional[str]]:
-    """Return (board_hint, group_hint) for the category. Unknown labels fall
-    back to General Governance so downstream never has to handle nulls here."""
-    return _MONDAY_HINTS.get(label, _MONDAY_HINTS["General Governance"])
+    """Return (board_hint, group_hint) for the category. An unrecognized label
+    routes to Triage — an unknown category is itself a reason for a human to
+    look, not something to silently file under governance."""
+    return _MONDAY_HINTS.get(label, _MONDAY_HINTS["Unclassified"])
 
 
 def priority_for(keyword_hits: list[str]) -> str:
