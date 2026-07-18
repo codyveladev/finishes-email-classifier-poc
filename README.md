@@ -45,7 +45,7 @@ This service does the reading part.
 
 It does **not** write to SharePoint or Monday. It returns decisions; the
 orchestrator takes the actions. That separation is deliberate — see
-[INTEGRATION.md](INTEGRATION.md).
+[INTEGRATION.md](docs/INTEGRATION.md).
 
 ### The seven categories
 
@@ -93,7 +93,7 @@ same endpoint and get the same answer.
 
 Attachments never leave the Microsoft tenant; only the classification metadata
 crosses to Zapier for the Monday write. Full rationale, including why Zapier
-*cannot* handle the mailbox side, is in [INTEGRATION.md](INTEGRATION.md).
+*cannot* handle the mailbox side, is in [INTEGRATION.md](docs/INTEGRATION.md).
 
 ---
 
@@ -284,10 +284,10 @@ so the extraction, regex, and per-file attribution are genuinely exercised.
 
 | | |
 |---|---|
-| **[INTEGRATION.md](INTEGRATION.md)** | How the live system is wired end to end — every Power Automate expression, the Zapier setup, and the binary-encoding traps that cost real hours. **Read this before touching the flow.** |
-| **[PLAN.md](PLAN.md)** | The build plan and per-phase design decisions |
-| **[PROGRESS.md](PROGRESS.md)** | Build log |
-| **[API_TEST_CASES.md](API_TEST_CASES.md)** | 12 copy-paste test cases with expected results, plus the Parse JSON schema |
+| **[INTEGRATION.md](docs/INTEGRATION.md)** | How the live system is wired end to end — every Power Automate expression, the Zapier setup, and the binary-encoding traps that cost real hours. **Read this before touching the flow.** |
+| **[PLAN.md](docs/PLAN.md)** | The build plan and per-phase design decisions |
+| **[PROGRESS.md](docs/PROGRESS.md)** | Build log |
+| **[API_TEST_CASES.md](docs/API_TEST_CASES.md)** | 12 copy-paste test cases with expected results, plus the Parse JSON schema |
 
 ---
 
@@ -324,7 +324,7 @@ lands a flagged item on the Monday intake board.
 </td></tr>
 </table>
 
-Detail on each gap: [INTEGRATION.md §7](INTEGRATION.md).
+Detail on each gap: [INTEGRATION.md §7](docs/INTEGRATION.md).
 
 ---
 
