@@ -179,15 +179,15 @@ print(client.models.generate_content(
 
 > **Model note:** currently running `gemini-2.5-flash-lite` — chosen for higher
 > free-tier quota (better for iteration). Any Gemini Flash variant works; swap
-> the `MODEL` constant in [classifier.py](classifier.py). The web form's model
+> the `MODEL` constant in [classifier.py](../classifier.py). The web form's model
 > badge reflects it live.
 
 ---
 
 ## 7. Phase 1 — Core classifier (CLI, hard-coded input) ✅ shipped
 
-As-shipped lives in [classifier.py](classifier.py), [extract.py](extract.py),
-[categories.py](categories.py), and [run_cli.py](run_cli.py). The initial
+As-shipped lives in [classifier.py](../classifier.py), [extract.py](../extract.py),
+[categories.py](../categories.py), and [run_cli.py](../run_cli.py). The initial
 sketch below is preserved as historical context — the shipped code adds
 identifier extraction and per-category prompt guidance beyond this sketch.
 
@@ -281,13 +281,13 @@ for the lease PDF without errors.
 
 Runs one case (the lease) by default to save free-tier quota; `RUN_ALL=1 python
 test_cases.py` runs all 7 with a 13s delay between calls. Test data lives in
-[cases.py](cases.py); both `test_cases.py` and `app.py`'s form presets read
+[cases.py](../cases.py); both `test_cases.py` and `app.py`'s form presets read
 from it — single source of truth.
 
 **Verified result:** 7/7 correct at last full run. Vendor agreement (case 2)
 correctly lands on Vendor Performance with a sensible rationale.
 
-Case table (also encoded in [cases.py](cases.py)):
+Case table (also encoded in [cases.py](../cases.py)):
 
 | # | sender_domain | subject | attachment | Expected label |
 |---|---------------|---------|------------|----------------|
@@ -339,11 +339,11 @@ sparingly; cache results while iterating so you don't burn quota.
 
 ## 9. Phase 3 — Web form front end ✅ shipped
 
-As-shipped lives in [app.py](app.py) + [templates/form.html](templates/form.html).
+As-shipped lives in [app.py](../app.py) + [templates/form.html](../templates/form.html).
 Substantially richer than the original sketch:
 
 - **File upload** (PDF today; docx/xlsx once Phase 4 ships) — beats the sample dropdown when both are set
-- **Preset dropdown** — all 7 cases from [cases.py](cases.py); selecting locks form fields
+- **Preset dropdown** — all 7 cases from [cases.py](../cases.py); selecting locks form fields
 - **Clear** link — resets to a blank form
 - **Post-Redirect-Get** — POST stashes result in a UUID-keyed in-memory cache and returns 303 → `/?rid=<uuid>`. GET reads-and-pops. Reload no longer re-fires the API.
 - **Graceful error handling** — 429/403/API/server/unknown errors render in a red block rather than 500
@@ -469,7 +469,7 @@ Refactor `extract.py` into a dispatcher on file extension:
 ### Test additions
 
 - Add one `.docx` sample to `samples/` (e.g. a vendor agreement in Word matching the existing PDF vendor case)
-- Add a corresponding case to [cases.py](cases.py) → `Vendor Performance` or `Compliance / Legal`
+- Add a corresponding case to [cases.py](../cases.py) → `Vendor Performance` or `Compliance / Legal`
 - Verify the identifier regex still finds `OP-####` / `AS-###` inside extracted docx text
 
 ### Acceptance
@@ -566,7 +566,7 @@ to the right Monday.com / SharePoint record.
 
 ### How it works
 
-1. **Regex pre-pass** (`find_identifiers()` in [classifier.py](classifier.py))
+1. **Regex pre-pass** (`find_identifiers()` in [classifier.py](../classifier.py))
    scans the assembled signal text — subject + body + attachment text — for
    all `OP-####` / `AS-###` matches. Returns deduped, order-preserved list of
    candidates. Cheap and deterministic.
